@@ -75,7 +75,7 @@ export function Hero() {
             </span>
             <span style={{ display: 'block', overflow: 'hidden' }}>
               <span style={{ display: 'block', animation: 'wpUp .9s cubic-bezier(.16,.84,.3,1) .12s both', color: 'var(--accent-ink)' }}>
-                Ship the Terraform.
+                Ship the infra.
               </span>
             </span>
           </h1>
@@ -90,8 +90,7 @@ export function Hero() {
               animation: 'wpUp .9s cubic-bezier(.16,.84,.3,1) .24s both',
             }}
           >
-            We got tired of drawing the architecture in a diagram tool and then writing the same thing again in HCL. So the
-            diagram <em style={{ fontStyle: 'normal', color: 'var(--ink)', borderBottom: '1px solid var(--accent-ink)' }}>is</em>{' '}
+            The diagram <em style={{ fontStyle: 'normal', color: 'var(--ink)', borderBottom: '1px solid var(--accent-ink)' }}>is</em>{' '}
             the source now — wire resources on a canvas, and whiparc emits Terraform and Ansible you can read, review in a
             PR, and run.
           </p>

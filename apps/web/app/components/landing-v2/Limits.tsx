@@ -210,9 +210,9 @@ export function Limits() {
             <BlueprintCorners />
             <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 'clamp(17px,1.9vw,26px)', lineHeight: 1.45, letterSpacing: '-.015em', color: 'var(--ink)' }}>
               So much gets built and just sits on localhost — the deployment step is where most people stall. We&apos;re two
-              people who maintained other teams&apos; Terraform for years, and whiparc is the tool we wanted then: a single
-              canvas to learn how the cloud actually fits together, and to ship for real, with real files and no layer in
-              between that you can&apos;t read.
+              people who spent years deep in other teams&apos; Ansible playbooks and Terraform modules, and whiparc is the
+              tool we wanted then: a single canvas to learn how the cloud actually fits together, and to ship for real,
+              with real files and no layer in between that you can&apos;t read.
             </p>
             <div style={{ marginTop: 14, fontFamily: 'var(--font-mono-marketing)', fontSize: 11, letterSpacing: '.14em', textTransform: 'uppercase', color: 'var(--ink2)' }}>
               — whiparc maintainers
