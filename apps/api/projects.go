@@ -24,15 +24,28 @@ type Team struct {
 }
 
 type Project struct {
-	ID          string    `json:"id"`
-	TeamID      string    `json:"team_id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Visibility  string    `json:"visibility"`
-	CreatedBy   string    `json:"created_by"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	UserRole    string    `json:"user_role,omitempty"` // populated on details
+	ID          string     `json:"id"`
+	TeamID      string     `json:"team_id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	Visibility  string     `json:"visibility"`
+	CreatedBy   string     `json:"created_by"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
+	UserRole    string     `json:"user_role,omitempty"` // populated on details
+}
+
+// parseProjectTimestamp mirrors the RFC3339-then-legacy-layout fallback
+// already used inline for created_at/updated_at throughout this file —
+// factored out here so archived_at (nullable) doesn't need to duplicate it
+// a third time.
+func parseProjectTimestamp(s string) time.Time {
+	t, _ := time.Parse(time.RFC3339, s)
+	if t.IsZero() {
+		t, _ = time.Parse("2006-01-02 15:04:05", s)
+	}
+	return t
 }
 
 type JoinRequest struct {
@@ -165,16 +178,27 @@ func handleGetProjects(w http.ResponseWriter, r *http.Request) {
 	// made this entire query fail on Postgres — the real cause of projects
 	// never showing up after the Supabase migration even though creation
 	// succeeded.
+	// archived=1 flips the listing to archived-only (product-memory 08.5
+	// item B2) — default excludes archived projects from every existing
+	// caller (dashboard, command palette, run/activity fan-outs) without
+	// any of them needing to change.
+	archivedOnly := r.URL.Query().Get("archived") == "1" || r.URL.Query().Get("archived") == "true"
+	archivedCond := "p.archived_at IS NULL"
+	if archivedOnly {
+		archivedCond = "p.archived_at IS NOT NULL"
+	}
+
 	query := `
-		SELECT p.id, p.team_id, p.name, p.description, p.visibility, p.created_by, p.created_at, p.updated_at,
+		SELECT p.id, p.team_id, p.name, p.description, p.visibility, p.created_by, p.created_at, p.updated_at, p.archived_at,
 		       COALESCE(pm.role, CASE WHEN p.created_by = ? THEN 'ADMIN' ELSE '' END) as user_role
 		FROM projects p
 		LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
 		LEFT JOIN team_members tm ON tm.team_id = p.team_id AND tm.user_id = ?
-		WHERE p.created_by = ?
+		WHERE (p.created_by = ?
 		   OR pm.user_id IS NOT NULL
 		   OR (p.visibility = 'TEAM' AND tm.user_id IS NOT NULL)
-		   OR p.visibility = 'PUBLIC'`
+		   OR p.visibility = 'PUBLIC')
+		   AND ` + archivedCond
 
 	rows, err := db.Query(query, user.ID, user.ID, user.ID, user.ID)
 	if err != nil {
@@ -187,18 +211,19 @@ func handleGetProjects(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p Project
 		var createdAtStr, updatedAtStr string
-		err := rows.Scan(&p.ID, &p.TeamID, &p.Name, &p.Description, &p.Visibility, &p.CreatedBy, &createdAtStr, &updatedAtStr, &p.UserRole)
+		var archivedAtStr sql.NullString
+		err := rows.Scan(&p.ID, &p.TeamID, &p.Name, &p.Description, &p.Visibility, &p.CreatedBy, &createdAtStr, &updatedAtStr, &archivedAtStr, &p.UserRole)
 		if err != nil {
 			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		p.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
-		if p.CreatedAt.IsZero() {
-			p.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
-		}
-		p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAtStr)
-		if p.UpdatedAt.IsZero() {
-			p.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAtStr)
+		p.CreatedAt = parseProjectTimestamp(createdAtStr)
+		p.UpdatedAt = parseProjectTimestamp(updatedAtStr)
+		if archivedAtStr.Valid {
+			t := parseProjectTimestamp(archivedAtStr.String)
+			if !t.IsZero() {
+				p.ArchivedAt = &t
+			}
 		}
 		projects = append(projects, p)
 	}
@@ -309,8 +334,9 @@ func handleGetProjectByID(w http.ResponseWriter, r *http.Request) {
 
 	var p Project
 	var createdAtStr, updatedAtStr string
-	err := db.QueryRow("SELECT id, team_id, name, description, visibility, created_by, created_at, updated_at FROM projects WHERE id = ?", projectID).Scan(
-		&p.ID, &p.TeamID, &p.Name, &p.Description, &p.Visibility, &p.CreatedBy, &createdAtStr, &updatedAtStr)
+	var archivedAtStr sql.NullString
+	err := db.QueryRow("SELECT id, team_id, name, description, visibility, created_by, created_at, updated_at, archived_at FROM projects WHERE id = ?", projectID).Scan(
+		&p.ID, &p.TeamID, &p.Name, &p.Description, &p.Visibility, &p.CreatedBy, &createdAtStr, &updatedAtStr, &archivedAtStr)
 	if err == sql.ErrNoRows {
 		http.Error(w, "Project not found", http.StatusNotFound)
 		return
@@ -319,13 +345,13 @@ func handleGetProjectByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
-	if p.CreatedAt.IsZero() {
-		p.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
-	}
-	p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAtStr)
-	if p.UpdatedAt.IsZero() {
-		p.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAtStr)
+	p.CreatedAt = parseProjectTimestamp(createdAtStr)
+	p.UpdatedAt = parseProjectTimestamp(updatedAtStr)
+	if archivedAtStr.Valid {
+		t := parseProjectTimestamp(archivedAtStr.String)
+		if !t.IsZero() {
+			p.ArchivedAt = &t
+		}
 	}
 
 	// Fetch current user role
@@ -727,6 +753,145 @@ func handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Project deleted successfully"})
+}
+
+// POST /api/projects/{id}/duplicate
+// product-memory 08.5 item B2. Copies name/description and the current
+// canvas state into a brand-new project; never the original's visibility —
+// a duplicate of a PUBLIC/TEAM project starts PRIVATE so it doesn't leak
+// into the source's audience before the duplicating user has reviewed it.
+// Gated at RequireProjectRole("VIEWER") in main.go: duplicating never
+// mutates the source project, so anyone who can already see it (including a
+// PUBLIC-catalog viewer with no project_members row at all) may copy it.
+func handleDuplicateProject(w http.ResponseWriter, r *http.Request) {
+	sourceID := r.PathValue("id")
+	user, ok := GetUserFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var payload struct {
+		TeamID string `json:"team_id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&payload)
+
+	var src Project
+	err := db.QueryRow("SELECT id, team_id, name, description FROM projects WHERE id = ?", sourceID).Scan(
+		&src.ID, &src.TeamID, &src.Name, &src.Description)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Defaults to the source project's own team; a caller may pass a
+	// different team_id (e.g. duplicating a PUBLIC project they don't
+	// belong to into one of their own teams).
+	teamID := strings.TrimSpace(payload.TeamID)
+	if teamID == "" {
+		teamID = src.TeamID
+	}
+
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM team_members WHERE team_id = ? AND user_id = ?", teamID, user.ID).Scan(&count)
+	if err != nil || count == 0 {
+		http.Error(w, "Forbidden: You are not a member of the destination team", http.StatusForbidden)
+		return
+	}
+
+	var nodesJSON, edgesJSON, viewportJSON string
+	err = db.QueryRow("SELECT nodes_json, edges_json, viewport_json FROM canvas_states WHERE project_id = ?", sourceID).Scan(
+		&nodesJSON, &edgesJSON, &viewportJSON)
+	if err == sql.ErrNoRows {
+		nodesJSON, edgesJSON, viewportJSON = "[]", "[]", `{"x":0,"y":0,"zoom":1}`
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	newID := fmt.Sprintf("proj_%d", time.Now().UnixNano())
+	newName := src.Name + " (Copy)"
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("INSERT INTO projects (id, team_id, name, description, visibility, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+		newID, teamID, newName, src.Description, "PRIVATE", user.ID)
+	if err != nil {
+		http.Error(w, "Failed to duplicate project: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	pmID := fmt.Sprintf("pmem_%d", time.Now().UnixNano())
+	_, err = tx.Exec("INSERT INTO project_members (id, project_id, user_id, role, added_by) VALUES (?, ?, ?, ?, ?)",
+		pmID, newID, user.ID, "ADMIN", user.ID)
+	if err != nil {
+		http.Error(w, "Failed to assign project access: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	_, err = tx.Exec("INSERT INTO canvas_states (project_id, nodes_json, edges_json, viewport_json, updated_by) VALUES (?, ?, ?, ?, ?)",
+		newID, nodesJSON, edgesJSON, viewportJSON, user.ID)
+	if err != nil {
+		http.Error(w, "Failed to copy canvas state: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	insertActivityEvent(newID, user.ID, "project.created", map[string]interface{}{"name": newName, "duplicated_from": sourceID})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{"id": newID, "name": newName})
+}
+
+// PATCH /api/projects/{id}/archive
+// Soft-hides a project from the default GET /api/projects listing without
+// touching any of its data — the reversible alternative to delete's
+// permanent removal. RequireProjectRole("ADMIN") in main.go, same gate as
+// rename/delete.
+func handleArchiveProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	res, err := db.Exec("UPDATE projects SET archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NULL", projectID)
+	if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "Project not found or already archived", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Project archived successfully"})
+}
+
+// PATCH /api/projects/{id}/unarchive
+func handleUnarchiveProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	res, err := db.Exec("UPDATE projects SET archived_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NOT NULL", projectID)
+	if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "Project not found or not archived", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Project unarchived successfully"})
 }
 
 type ProjectMemberInfo struct {

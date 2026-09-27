@@ -40,6 +40,10 @@ interface ProjectSettingsModalProps {
   onUpdateProjectDetails: (updated: Project) => void;
   projectId: string;
   onCredentialsChange?: (credentials: CredentialItem[]) => void;
+  /** Which tab to land on when this modal instance mounts — lets a caller
+      (e.g. a card's "Delete" menu item) jump straight to Danger Zone
+      instead of always opening on General Settings. */
+  initialTab?: 'general' | 'members' | 'credentials' | 'agents' | 'danger';
 }
 
 const fieldLabelStyle: CSSProperties = {
@@ -164,9 +168,10 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
   projectDetails,
   onUpdateProjectDetails,
   projectId,
-  onCredentialsChange
+  onCredentialsChange,
+  initialTab
 }) => {
-  const [activeTab, setActiveTab] = useState<'general' | 'members' | 'credentials' | 'agents' | 'danger'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'members' | 'credentials' | 'agents' | 'danger'>(initialTab || 'general');
   const [name, setName] = useState(projectDetails?.name || '');
   const [description, setDescription] = useState(projectDetails?.description || '');
   const [visibility, setVisibility] = useState(projectDetails?.visibility || 'PRIVATE');

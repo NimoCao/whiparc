@@ -137,6 +137,24 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     6,
+		description: "add_archived_at_to_projects",
+		up: func(tx sqlExecer) error {
+			// Nullable, no default: NULL means "active" (today's only state,
+			// unchanged for every existing row), non-NULL is the archive
+			// timestamp. Same DATETIME/pgSchema dance as migration 4's
+			// onboarding_dismissed_at.
+			ddl := "ALTER TABLE projects ADD COLUMN archived_at DATETIME"
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to add archived_at: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

@@ -11,6 +11,7 @@ export interface Project {
   created_by: string;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
   user_role: string;
 }
 
