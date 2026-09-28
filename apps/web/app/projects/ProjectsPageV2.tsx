@@ -139,6 +139,8 @@ export default function ProjectsPageV2() {
   }, [token, showArchived]);
 
   useEffect(() => {
+    // Fetching on mount/dependency change is the intended synchronization with the projects API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadProjects();
   }, [loadProjects]);
 
