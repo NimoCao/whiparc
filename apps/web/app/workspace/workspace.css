@@ -134,3 +134,132 @@
 .react-flow__controls-button svg {
   fill: currentColor;
 }
+
+/* Connection inspector controls (components/canvas/EdgeInspector.tsx):
+   square checkbox, hairline slider and square color swatches instead of the
+   browser defaults / round chips, all on the theme variables. */
+.wp-ws-check {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  display: grid;
+  place-content: center;
+  border: 1px solid var(--line);
+  background: var(--elevated);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.wp-ws-check:hover {
+  border-color: var(--accent-ink);
+}
+
+.wp-ws-check:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.wp-ws-check:checked::after {
+  content: '';
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid var(--on-accent);
+  border-bottom: 2px solid var(--on-accent);
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+.wp-ws-range {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  height: 14px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.wp-ws-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--line);
+}
+
+.wp-ws-range::-moz-range-track {
+  height: 2px;
+  background: var(--line);
+}
+
+.wp-ws-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 14px;
+  margin-top: -6px;
+  border: 0;
+  border-radius: 0;
+  background: var(--accent);
+}
+
+.wp-ws-range::-moz-range-thumb {
+  width: 10px;
+  height: 14px;
+  border: 0;
+  border-radius: 0;
+  background: var(--accent);
+}
+
+.wp-ws-check:focus-visible,
+.wp-ws-range:focus-visible,
+.wp-ws-swatch:focus-visible,
+.wp-ws-danger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.wp-ws-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.wp-ws-swatch:hover {
+  border-color: var(--ink2);
+}
+
+.wp-ws-swatch[data-active='true'] {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* "Auto" resets to the color derived from the target node. */
+.wp-ws-swatch-auto {
+  width: auto;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--ink2);
+  font-family: var(--font-mono-marketing, ui-monospace, monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wp-ws-swatch-auto:hover,
+.wp-ws-swatch-auto[data-active='true'] {
+  color: var(--ink);
+}
+
+.wp-ws-danger {
+  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--danger);
+  transition: background 0.15s ease;
+}
+
+.wp-ws-danger:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}

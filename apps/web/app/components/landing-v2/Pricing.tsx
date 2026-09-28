@@ -110,7 +110,7 @@ export function Pricing() {
             </div>
             <Link
               href={startHref}
-              style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: 'var(--accent)', color: '#FFFFFF', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15, padding: '13px 20px', whiteSpace: 'nowrap' }}
+              style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, background: 'var(--accent)', color: 'var(--on-accent)', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15, padding: '13px 20px', whiteSpace: 'nowrap' }}
             >
               <span>Start free</span>
               <Icon icon="lucide:arrow-right" width={16} />

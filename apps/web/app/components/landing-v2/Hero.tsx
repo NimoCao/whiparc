@@ -4,7 +4,7 @@ import { useMarketingCta } from './useMarketingCta';
 import Link from 'next/link';
 
 const HERO_NODES = [
-  { id: '0', left: '6%', top: '16%', width: '46%', kicker: 'aws_vpc', label: 'main', tint: 'rgba(99,102,241,.07)', border: 'var(--line)' },
+  { id: '0', left: '6%', top: '16%', width: '46%', kicker: 'aws_vpc', label: 'main', tint: 'rgba(255,106,61,.07)', border: 'var(--line)' },
   { id: '1', left: '6%', top: '50%', width: '48%', kicker: 'aws_instance', label: 'app · t3.small', tint: 'var(--panel)', border: 'var(--line)' },
   { id: '2', right: '6%', top: '22%', width: '40%', kicker: 'ansible', label: 'nginx + certs', tint: 'var(--panel)', border: 'var(--line)' },
 ] as const;
@@ -75,7 +75,7 @@ export function Hero() {
             </span>
             <span style={{ display: 'block', overflow: 'hidden' }}>
               <span style={{ display: 'block', animation: 'wpUp .9s cubic-bezier(.16,.84,.3,1) .12s both', color: 'var(--accent-ink)' }}>
-                Ship the Terraform.
+                Ship the infra.
               </span>
             </span>
           </h1>
@@ -90,8 +90,7 @@ export function Hero() {
               animation: 'wpUp .9s cubic-bezier(.16,.84,.3,1) .24s both',
             }}
           >
-            We got tired of drawing the architecture in a diagram tool and then writing the same thing again in HCL. So the
-            diagram <em style={{ fontStyle: 'normal', color: 'var(--ink)', borderBottom: '1px solid var(--accent-ink)' }}>is</em>{' '}
+            The diagram <em style={{ fontStyle: 'normal', color: 'var(--ink)', borderBottom: '1px solid var(--accent-ink)' }}>is</em>{' '}
             the source now — wire resources on a canvas, and whiparc emits Terraform and Ansible you can read, review in a
             PR, and run.
           </p>
@@ -104,7 +103,7 @@ export function Hero() {
                 alignItems: 'center',
                 gap: 9,
                 background: 'var(--accent)',
-                color: '#FFFFFF',
+                color: 'var(--on-accent)',
                 fontFamily: 'var(--font-display)',
                 fontWeight: 600,
                 fontSize: 15,
@@ -190,14 +189,14 @@ export function Hero() {
               <svg data-graph="hero" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }}>
                 <defs>
                   <marker id="wpTipH" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto" markerUnits="userSpaceOnUse">
-                    <path d="M0.5 1.2L9 5L0.5 8.8" fill="none" stroke="#6366F1" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M0.5 1.2L9 5L0.5 8.8" fill="none" stroke="#FF6A3D" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
                   </marker>
                   <marker id="wpTipHA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto" markerUnits="userSpaceOnUse">
                     <path d="M0.5 1.2L9 5L0.5 8.8" fill="none" stroke="#F59E0B" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" />
                   </marker>
                 </defs>
-                <path data-wire="0" data-from="0" data-to="1" data-route="down" data-delay="500" fill="none" stroke="#6366F1" strokeWidth={1.3} markerEnd="url(#wpTipH)" />
-                <path data-wire="1" data-from="1" data-to="2" data-route="right" data-delay="700" fill="none" stroke="#6366F1" strokeWidth={1.3} markerEnd="url(#wpTipH)" />
+                <path data-wire="0" data-from="0" data-to="1" data-route="down" data-delay="500" fill="none" stroke="#FF6A3D" strokeWidth={1.3} markerEnd="url(#wpTipH)" />
+                <path data-wire="1" data-from="1" data-to="2" data-route="right" data-delay="700" fill="none" stroke="#FF6A3D" strokeWidth={1.3} markerEnd="url(#wpTipH)" />
                 <path data-wire="2" data-from="2" data-to="3" data-route="down" data-delay="900" fill="none" stroke="#F59E0B" strokeWidth={1.3} markerEnd="url(#wpTipHA)" />
               </svg>
               {HERO_NODES.map((n, i) => (
@@ -247,19 +246,19 @@ export function Hero() {
                 right: -6,
                 bottom: -30,
                 width: 'min(74%,320px)',
-                background: '#0D0F16',
+                background: '#17181C',
                 border: '1px solid var(--line)',
                 boxShadow: '0 22px 50px rgba(0,0,0,.55)',
                 padding: '10px 12px',
                 animation: 'wpUp .9s cubic-bezier(.16,.84,.3,1) 1.05s both',
               }}
             >
-              <div style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', color: '#64748B', marginBottom: 6 }}>
+              <div style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', color: '#7B7E88', marginBottom: 6 }}>
                 main.tf · emitted
               </div>
               <div style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 11, lineHeight: 1.72, color: '#CBD5E1', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                 <div>
-                  <span style={{ color: '#9EA2F9' }}>resource</span> <span style={{ color: '#F59E0B' }}>&quot;aws_instance&quot;</span>{' '}
+                  <span style={{ color: '#FF8A63' }}>resource</span> <span style={{ color: '#F59E0B' }}>&quot;aws_instance&quot;</span>{' '}
                   <span style={{ color: '#F59E0B' }}>&quot;app&quot;</span> {'{'}
                 </div>
                 <div>
@@ -268,7 +267,7 @@ export function Hero() {
                 <div>&nbsp;&nbsp;subnet_id&nbsp;&nbsp;&nbsp;&nbsp; = aws_subnet.app.id</div>
                 <div>
                   {'}'}
-                  <span style={{ animation: 'wpBlink 1.1s steps(1) infinite', color: '#9EA2F9' }}>▌</span>
+                  <span style={{ animation: 'wpBlink 1.1s steps(1) infinite', color: '#FF8A63' }}>▌</span>
                 </div>
               </div>
             </div>

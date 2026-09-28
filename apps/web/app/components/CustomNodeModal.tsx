@@ -5,6 +5,10 @@ import { Icon } from '@iconify/react';
 import { useAuthStore } from '../store/useAuthStore';
 import useCanvasStore from '../store/useCanvasStore';
 import type { CustomLibraryNode } from '../store/useCanvasStore';
+import { BlueprintCorners } from './ui/BlueprintCorners';
+import { techColor } from '../lib/canvasDesign';
+import './ui/blueprint.css';
+import './CustomNodeModal.css';
 
 interface CustomNodeModalProps {
   isOpen: boolean;
@@ -17,6 +21,19 @@ interface ValidationError {
   column: number;
   message: string;
 }
+
+const TECH_OPTIONS = [
+  { value: 'Terraform', label: 'Terraform Resource / Module' },
+  { value: 'Ansible', label: 'Ansible Task / Block' },
+  { value: 'Kubernetes', label: 'Kubernetes Resource' },
+] as const;
+
+const KICKER_STYLE = {
+  fontFamily: 'var(--font-mono-marketing, ui-monospace, monospace)',
+  fontSize: 10,
+  letterSpacing: '.1em',
+  textTransform: 'uppercase',
+} as const;
 
 export default function CustomNodeModal({ isOpen, onClose, projectId }: CustomNodeModalProps) {
   const { user, token, upgradePlan } = useAuthStore();
@@ -226,138 +243,228 @@ spec:
   };
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(2px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       
       {/* PAYWALL UPGRADE STATE */}
       {!isPremium ? (
-        <div className="bg-card border border-border rounded-xl shadow-2xl w-[480px] overflow-hidden animate-in fade-in zoom-in duration-200">
-          <div className="p-6 text-center space-y-4">
-            <div className="h-14 w-14 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 flex items-center justify-center text-2xl mx-auto shadow-lg shadow-purple-500/5 animate-pulse">
-              <Icon icon="lucide:sparkles" />
-            </div>
-            <div className="space-y-1.5">
-              <h3 className="text-lg font-heading font-bold text-foreground">Upgrade to Premium</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed px-4">
-                Unlock custom visual blocks to upload, syntax validate, and drop your own infrastructure-as-code scripts.
-              </p>
-            </div>
+        <div
+          className="wp-blueprint"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="wp-cnm-paywall-title"
+          style={{ position: 'relative', width: 480, maxWidth: '100%', background: 'var(--panel)', padding: 24 }}
+        >
+          <BlueprintCorners />
 
-            <div className="bg-muted/30 border border-border rounded-xl p-4 text-left space-y-2.5 text-xs text-slate-300">
-              <div className="flex items-start gap-2">
-                <Icon icon="lucide:check-circle-2" className="text-emerald-400 text-sm shrink-0 mt-0.5" />
-                <span>Upload Custom Terraform HCL & Kubernetes Manifests</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <Icon icon="lucide:check-circle-2" className="text-emerald-400 text-sm shrink-0 mt-0.5" />
-                <span>Author Reusable Ansible Service & Playbook Tasks</span>
-              </div>
-              <div className="flex items-start gap-2">
-                <Icon icon="lucide:check-circle-2" className="text-emerald-400 text-sm shrink-0 mt-0.5" />
-                <span>Extract Variables Dynamically into the Inspector Panel</span>
-              </div>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '1px 6px',
+                border: '1px solid var(--amber)',
+                color: 'var(--amber)',
+                fontFamily: 'var(--font-mono-marketing, ui-monospace, monospace)',
+                fontSize: 9.5,
+                letterSpacing: '.08em',
+              }}
+            >
+              <Icon icon="lucide:lock" width={9} />
+              PRO
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="wp-cnm-close"
+              aria-label="Close"
+              style={{ background: 'none', border: 0, padding: 4, margin: -4, color: 'var(--ink2)', cursor: 'pointer', display: 'flex' }}
+            >
+              <Icon icon="lucide:x" width={16} />
+            </button>
+          </div>
 
-            <div className="pt-3 flex flex-col gap-2">
-              <button
-                onClick={handleUpgrade}
-                disabled={upgradeLoading}
-                className="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-sm font-bold rounded-lg transition-all shadow-lg shadow-indigo-950/20 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+          <h3
+            id="wp-cnm-paywall-title"
+            style={{ margin: '14px 0 0', fontFamily: 'var(--font-display, inherit)', fontWeight: 600, fontSize: 22, letterSpacing: '-.01em', color: 'var(--ink)' }}
+          >
+            Upgrade to Premium
+          </h3>
+          <p style={{ margin: '8px 0 0', fontSize: 13.5, lineHeight: 1.55, color: 'var(--ink2)' }}>
+            Unlock custom visual blocks to upload, syntax validate, and drop your own infrastructure-as-code scripts.
+          </p>
+
+          <p
+            style={{
+              margin: '20px 0 8px',
+              fontFamily: 'var(--font-mono-marketing, ui-monospace, monospace)',
+              fontSize: 9.5,
+              letterSpacing: '.12em',
+              textTransform: 'uppercase',
+              color: 'var(--ink3)',
+            }}
+          >
+            Included
+          </p>
+          <ul style={{ margin: 0, padding: 0, listStyle: 'none', border: '1px solid var(--line)' }}>
+            {[
+              'Upload Custom Terraform HCL & Kubernetes Manifests',
+              'Author Reusable Ansible Service & Playbook Tasks',
+              'Extract Variables Dynamically into the Inspector Panel',
+            ].map((feature, i) => (
+              <li
+                key={feature}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '10px 12px',
+                  borderTop: i === 0 ? 0 : '1px solid var(--line)',
+                  fontSize: 13,
+                  color: 'var(--ink)',
+                }}
               >
-                {upgradeLoading ? (
-                  <Icon icon="lucide:loader-2" className="animate-spin text-base" />
-                ) : (
-                  <Icon icon="lucide:zap" className="text-base animate-bounce" />
-                )}
-                Upgrade to Pro (Instant Sandbox)
-              </button>
-              <button
-                onClick={onClose}
-                className="w-full py-2.5 bg-muted text-foreground hover:bg-muted/80 text-sm font-semibold rounded-lg transition-all cursor-pointer border border-border"
-              >
-                Maybe Later
-              </button>
-            </div>
+                <Icon icon="lucide:check" width={14} style={{ flexShrink: 0, color: 'var(--accent-ink)' }} />
+                {feature}
+              </li>
+            ))}
+          </ul>
+
+          <div style={{ marginTop: 24, display: 'grid', gap: 16 }}>
+            <button
+              type="button"
+              onClick={handleUpgrade}
+              disabled={upgradeLoading}
+              className="wp-blueprint wp-cnm-primary"
+              style={{
+                height: 42,
+                border: 0,
+                background: 'var(--accent)',
+                color: 'var(--on-accent)',
+                fontFamily: 'var(--font-display, inherit)',
+                fontWeight: 600,
+                fontSize: 14,
+                cursor: upgradeLoading ? 'default' : 'pointer',
+                opacity: upgradeLoading ? 0.6 : 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <BlueprintCorners />
+              {upgradeLoading ? <Icon icon="lucide:loader-2" width={15} className="animate-spin" /> : <Icon icon="lucide:zap" width={15} />}
+              Upgrade to Pro (Instant Sandbox)
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="wp-cnm-secondary"
+              style={{
+                height: 40,
+                border: '1px solid var(--line)',
+                background: 'transparent',
+                color: 'var(--ink)',
+                fontFamily: 'var(--font-display, inherit)',
+                fontWeight: 600,
+                fontSize: 13.5,
+                cursor: 'pointer',
+              }}
+            >
+              Maybe Later
+            </button>
           </div>
         </div>
       ) : (
 
         /* CODE EDITOR & CREATION DIALOG */
-        <div className="bg-card border border-border rounded-xl shadow-2xl w-[800px] h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
-          
+        <div
+          className="wp-blueprint"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="wp-cnm-title"
+          style={{ position: 'relative', width: 800, maxWidth: '100%', height: '85vh', display: 'flex', flexDirection: 'column', background: 'var(--panel)' }}
+        >
+          <BlueprintCorners />
+
           {/* Header */}
-          <div className="px-6 py-4 border-b border-border bg-muted/20 flex items-center justify-between">
+          <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
             <div>
-              <h3 className="text-base font-heading font-bold text-foreground">Create Custom Automation Block</h3>
-              <p className="text-[11px] text-muted-foreground">Synthesize your own configuration manifests into draggable visual objects.</p>
+              <h3 id="wp-cnm-title" style={{ margin: 0, fontFamily: 'var(--font-display, inherit)', fontWeight: 600, fontSize: 17, color: 'var(--ink)' }}>
+                Create Custom Automation Block
+              </h3>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--ink2)' }}>
+                Synthesize your own configuration manifests into draggable visual objects.
+              </p>
             </div>
             <button
+              type="button"
               onClick={onClose}
-              className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted transition-all cursor-pointer"
+              className="wp-cnm-close"
+              aria-label="Close"
+              style={{ background: 'none', border: 0, padding: 4, color: 'var(--ink2)', cursor: 'pointer', display: 'flex', flexShrink: 0 }}
             >
-              <Icon icon="lucide:x" className="text-base" />
+              <Icon icon="lucide:x" width={16} />
             </button>
           </div>
 
           {/* Form */}
-          <form onSubmit={handleCreate} className="flex-1 flex overflow-hidden">
-            
+          <form onSubmit={handleCreate} style={{ flex: 1, display: 'flex', minHeight: 0 }}>
             {/* Left side inputs */}
-            <div className="w-[300px] border-r border-border p-5 space-y-4 overflow-y-auto scrollbar-thin">
+            <div style={{ width: 300, flexShrink: 0, borderRight: '1px solid var(--line)', padding: 20, display: 'grid', gap: 16, alignContent: 'start', overflowY: 'auto' }}>
               <div>
-                <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Block Title</label>
+                <label htmlFor="wp-cnm-block-title" style={{ ...KICKER_STYLE, display: 'block', marginBottom: 6, color: 'var(--ink2)' }}>
+                  Block Title
+                </label>
                 <input
+                  id="wp-cnm-block-title"
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   required
                   placeholder="e.g. AWS Redshift Cluster"
-                  className="w-full px-3 py-1.5 bg-muted/40 border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-primary transition-all"
+                  className="wp-cnm-field"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Technology Type</label>
-                <div className="relative">
+                <span style={{ ...KICKER_STYLE, display: 'block', marginBottom: 6, color: 'var(--ink2)' }}>Technology Type</span>
+                <div style={{ position: 'relative' }}>
                   <button
                     type="button"
                     onClick={() => setIsTechDropdownOpen(!isTechDropdownOpen)}
-                    className="w-full px-3 py-1.5 bg-muted/40 border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-primary transition-all flex items-center justify-between text-left cursor-pointer"
+                    className="wp-cnm-field"
+                    aria-haspopup="listbox"
+                    aria-expanded={isTechDropdownOpen}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left', cursor: 'pointer' }}
                   >
-                    <span>
-                      {tech === 'Terraform' && 'Terraform Resource / Module'}
-                      {tech === 'Ansible' && 'Ansible Task / Block'}
-                      {tech === 'Kubernetes' && 'Kubernetes Resource'}
-                    </span>
-                    <Icon icon="lucide:chevron-down" className="text-muted-foreground text-xs" />
+                    <span>{TECH_OPTIONS.find((o) => o.value === tech)?.label}</span>
+                    <Icon icon="lucide:chevron-down" width={13} style={{ color: 'var(--ink3)' }} />
                   </button>
                   {isTechDropdownOpen && (
                     <>
-                      <div className="fixed inset-0 z-10" onClick={() => setIsTechDropdownOpen(false)}></div>
-                      <div className="absolute top-full left-0 w-full mt-1 bg-[#161D30] border border-border rounded-lg shadow-xl z-20 overflow-hidden p-1">
-                        <button
-                          type="button"
-                          onClick={() => { setTech('Terraform'); setIsTechDropdownOpen(false); }}
-                          className={`w-full text-left px-3 py-2 text-xs rounded hover:bg-primary/20 flex items-center justify-between transition-colors cursor-pointer ${tech === 'Terraform' ? 'bg-primary/10 text-primary' : 'text-foreground'}`}
-                        >
-                          <span>Terraform Resource / Module</span>
-                          {tech === 'Terraform' && <Icon icon="lucide:check" className="text-xs" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setTech('Ansible'); setIsTechDropdownOpen(false); }}
-                          className={`w-full text-left px-3 py-2 text-xs rounded hover:bg-primary/20 flex items-center justify-between transition-colors cursor-pointer ${tech === 'Ansible' ? 'bg-primary/10 text-primary' : 'text-foreground'}`}
-                        >
-                          <span>Ansible Task / Block</span>
-                          {tech === 'Ansible' && <Icon icon="lucide:check" className="text-xs" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setTech('Kubernetes'); setIsTechDropdownOpen(false); }}
-                          className={`w-full text-left px-3 py-2 text-xs rounded hover:bg-primary/20 flex items-center justify-between transition-colors cursor-pointer ${tech === 'Kubernetes' ? 'bg-primary/10 text-primary' : 'text-foreground'}`}
-                        >
-                          <span>Kubernetes Resource</span>
-                          {tech === 'Kubernetes' && <Icon icon="lucide:check" className="text-xs" />}
-                        </button>
+                      <div style={{ position: 'fixed', inset: 0, zIndex: 10 }} onClick={() => setIsTechDropdownOpen(false)} />
+                      <div role="listbox" style={{ position: 'absolute', top: '100%', left: 0, width: '100%', marginTop: 4, zIndex: 20, background: 'var(--panel)', border: '1px solid var(--line)', boxShadow: '0 12px 32px -12px rgba(0,0,0,.5)' }}>
+                        {TECH_OPTIONS.map((o, i) => (
+                          <button
+                            key={o.value}
+                            type="button"
+                            role="option"
+                            aria-selected={tech === o.value}
+                            onClick={() => {
+                              setTech(o.value);
+                              setIsTechDropdownOpen(false);
+                            }}
+                            className="wp-cnm-option"
+                            style={{ borderTop: i === 0 ? 0 : '1px solid var(--line)', color: tech === o.value ? 'var(--accent-ink)' : 'var(--ink)' }}
+                          >
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ width: 6, height: 6, background: techColor(o.value), flexShrink: 0 }} />
+                              {o.label}
+                            </span>
+                            {tech === o.value && <Icon icon="lucide:check" width={13} />}
+                          </button>
+                        ))}
                       </div>
                     </>
                   )}
@@ -365,40 +472,46 @@ spec:
               </div>
 
               <div>
-                <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Category Category</label>
+                <label htmlFor="wp-cnm-category" style={{ ...KICKER_STYLE, display: 'block', marginBottom: 6, color: 'var(--ink2)' }}>
+                  Category
+                </label>
                 <input
+                  id="wp-cnm-category"
                   type="text"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                   placeholder="e.g. Database, Custom Blocks"
-                  className="w-full px-3 py-1.5 bg-muted/40 border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-primary transition-all"
+                  className="wp-cnm-field"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Description</label>
+                <label htmlFor="wp-cnm-description" style={{ ...KICKER_STYLE, display: 'block', marginBottom: 6, color: 'var(--ink2)' }}>
+                  Description
+                </label>
                 <textarea
+                  id="wp-cnm-description"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={3}
                   placeholder="e.g. Deploys custom cache nodes inside production VPCs..."
-                  className="w-full px-3 py-1.5 bg-muted/40 border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-primary transition-all resize-none"
+                  className="wp-cnm-field"
                 />
               </div>
 
               {isValid && (
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-[11px] leading-relaxed">
-                  <div className="font-bold flex items-center gap-1.5 mb-1 text-xs">
-                    <Icon icon="lucide:check-circle-2" className="text-base" /> Validated Successfully
+                <div style={{ padding: 12, border: '1px solid var(--success)', background: 'color-mix(in srgb, var(--success) 8%, transparent)', color: 'var(--success)', fontSize: 12, lineHeight: 1.5 }}>
+                  <div style={{ ...KICKER_STYLE, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, fontSize: 10.5 }}>
+                    <Icon icon="lucide:check" width={13} /> Validated Successfully
                   </div>
                   {extractedParams.length > 0 ? (
                     <div>
                       Extracted Parameters:
-                      <ul className="list-disc list-inside mt-1 space-y-0.5 font-mono text-[10px] text-emerald-400/90 pl-1">
+                      <div style={{ marginTop: 6, display: 'grid', gap: 2, fontFamily: 'var(--font-mono-marketing, ui-monospace, monospace)', fontSize: 11 }}>
                         {extractedParams.map((p) => (
-                          <li key={p}>{p}</li>
+                          <div key={p}>{p}</div>
                         ))}
-                      </ul>
+                      </div>
                     </div>
                   ) : (
                     <span>Code block syntax is clean. No parameters detected.</span>
@@ -407,11 +520,11 @@ spec:
               )}
 
               {validationErrors.length > 0 && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-lg text-[11px] leading-relaxed max-h-[180px] overflow-y-auto">
-                  <div className="font-bold flex items-center gap-1.5 mb-1 text-xs">
-                    <Icon icon="lucide:alert-circle" className="text-base" /> Syntax Validation Error
+                <div style={{ padding: 12, border: '1px solid var(--danger)', background: 'color-mix(in srgb, var(--danger) 8%, transparent)', color: 'var(--danger)', fontSize: 12, lineHeight: 1.5, maxHeight: 180, overflowY: 'auto' }}>
+                  <div style={{ ...KICKER_STYLE, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, fontSize: 10.5 }}>
+                    <Icon icon="lucide:alert-circle" width={13} /> Syntax Validation Error
                   </div>
-                  <div className="space-y-1 font-mono text-[10px] text-rose-400/90">
+                  <div style={{ display: 'grid', gap: 4, fontFamily: 'var(--font-mono-marketing, ui-monospace, monospace)', fontSize: 11 }}>
                     {validationErrors.map((err, i) => (
                       <div key={i}>
                         Line {err.line}:{err.column} - {err.message}
@@ -423,60 +536,62 @@ spec:
             </div>
 
             {/* Right side editor */}
-            <div className="flex-1 flex flex-col bg-background">
-              {/* Tab options */}
-              <div className="h-10 px-4 border-b border-border bg-card flex items-center justify-between text-xs select-none">
-                <span className="font-mono text-slate-400 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
-                  <Icon icon="lucide:code-2" className="text-primary text-sm" />
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', background: 'var(--ground)' }}>
+              {/* File bar */}
+              <div style={{ height: 44, padding: '0 16px', flexShrink: 0, borderBottom: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', userSelect: 'none' }}>
+                <span style={{ ...KICKER_STYLE, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--ink2)' }}>
+                  <Icon icon="lucide:file-code" width={13} style={{ color: 'var(--accent-ink)' }} />
                   {tech === 'Terraform' ? 'custom.tf' : 'custom_tasks.yml'}
                 </span>
                 <button
                   type="button"
                   onClick={handleValidate}
                   disabled={isValidating}
-                  className="px-3 py-1 bg-primary text-primary-foreground hover:bg-primary/95 text-[10px] font-bold rounded flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                  className="wp-cnm-ghost"
+                  style={{ height: 28, padding: '0 12px', border: '1px solid var(--accent-ink)', background: 'transparent', color: 'var(--accent-ink)', fontFamily: 'var(--font-display, inherit)', fontWeight: 600, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: isValidating ? 'default' : 'pointer', opacity: isValidating ? 0.6 : 1 }}
                 >
-                  {isValidating && <Icon icon="lucide:loader-2" className="animate-spin" />}
+                  {isValidating && <Icon icon="lucide:loader-2" width={12} className="animate-spin" />}
                   Validate Script
                 </button>
               </div>
 
-              {/* Code TextArea */}
-              <div className="flex-1 p-3 relative font-mono text-xs">
-                <textarea
-                  value={rawCode}
-                  onChange={(e) => {
-                    setRawCode(e.target.value);
-                    setIsValid(false);
-                  }}
-                  required
-                  spellCheck={false}
-                  className="w-full h-full bg-transparent text-slate-200 border-none outline-none focus:ring-0 resize-none font-mono text-xs leading-relaxed select-text"
-                  placeholder="Paste your IaC automation block here..."
-                />
-              </div>
+              {/* Code textarea */}
+              <textarea
+                value={rawCode}
+                onChange={(e) => {
+                  setRawCode(e.target.value);
+                  setIsValid(false);
+                }}
+                required
+                spellCheck={false}
+                aria-label="Automation block source"
+                placeholder="Paste your IaC automation block here..."
+                className="wp-cnm-code"
+              />
 
-              {/* Action Footer */}
-              <div className="px-6 py-3 border-t border-border bg-muted/20 flex justify-end gap-3 shrink-0">
+              {/* Action footer */}
+              <div style={{ padding: '14px 22px', flexShrink: 0, borderTop: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-4 py-1.5 bg-muted text-foreground hover:bg-muted/80 text-xs font-semibold rounded-lg transition-all cursor-pointer"
+                  className="wp-cnm-secondary"
+                  style={{ height: 36, padding: '0 16px', border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink)', fontFamily: 'var(--font-display, inherit)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!isValid || !title.trim() || isSaving}
-                  className="px-4 py-1.5 bg-primary text-primary-foreground hover:bg-primary/95 disabled:bg-primary/50 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="wp-blueprint wp-cnm-primary"
+                  style={{ height: 36, padding: '0 18px', border: 0, background: 'var(--accent)', color: 'var(--on-accent)', fontFamily: 'var(--font-display, inherit)', fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
                 >
-                  {isSaving && <Icon icon="lucide:loader-2" className="animate-spin text-sm" />}
+                  <BlueprintCorners />
+                  {isSaving && <Icon icon="lucide:loader-2" width={14} className="animate-spin" />}
                   Add Visual Node to Canvas
                 </button>
               </div>
             </div>
           </form>
-
         </div>
       )}
     </div>

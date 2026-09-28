@@ -2,23 +2,23 @@
 @import "./animations.css";
 
 :root {
-  --background: #07080B;
-  --foreground: #FFFFFF;
-  --primary: #6366F1;
-  --primary-foreground: #FFFFFF;
-  --secondary: #12141C;
+  --background: #101114;
+  --foreground: #F5F5F6;
+  --primary: #FF6A3D;
+  --primary-foreground: #101114;
+  --secondary: #1E1F24;
   --secondary-foreground: #FFFFFF;
   --tertiary: #F59E0B;
-  --muted: #0F1015;
-  --muted-foreground: #94A3B8;
-  --accent: #12141C;
+  --muted: #141519;
+  --muted-foreground: #A3A6AF;
+  --accent: #1E1F24;
   --accent-foreground: #FFFFFF;
-  --card: #0D0F16;
+  --card: #17181C;
   --card-foreground: #FFFFFF;
   --destructive: #EF4444;
-  --border: #1E2233;
-  --input: #242838;
-  --ring: #6366F1;
+  --border: #2A2C33;
+  --input: #33353D;
+  --ring: #FF6A3D;
   --radius: 0.75rem;
 }
 
@@ -102,20 +102,5 @@ body {
   cursor: grabbing;
 }
 
-/* React Flow Edge Label Theme Styling */
-.react-flow__edge-textbg {
-  fill: #0D0F16 !important;
-  stroke: #1E2233 !important;
-  stroke-width: 1px !important;
-  rx: 6px !important;
-  ry: 6px !important;
-}
-
-.react-flow__edge-text {
-  fill: #F1F5F9 !important;
-  font-family: var(--font-sans) !important;
-  font-size: 11px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.025em !important;
-}
+/* Edge label styling lives in components/canvas/canvas.css (theme-aware). */
 

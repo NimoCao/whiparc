@@ -100,9 +100,9 @@ function ShaderPlane() {
       uTime: { value: 0 },
       uResolution: { value: new THREE.Vector2(1, 1) },
       uMouse: { value: new THREE.Vector2(0, 0) },
-      uColorA: { value: new THREE.Color('#6366F1') }, // indigo-500
+      uColorA: { value: new THREE.Color('#FF6A3D') }, // indigo-500
       uColorB: { value: new THREE.Color('#F59E0B') }, // amber-500
-      uColorC: { value: new THREE.Color('#07080B') }, // graphite base
+      uColorC: { value: new THREE.Color('#101114') }, // graphite base
     }),
     []
   );

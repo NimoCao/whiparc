@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-horizontal-cutout-light-text.png">
+    <img src="docs/assets/logo-horizontal-cutout-dark-text.png" alt="Whiparc" width="320">
+  </picture>
+</p>
+
 # Whiparc
 
 [![License: BSL 1.1 / MIT](https://img.shields.io/badge/license-BSL%201.1%20%2F%20MIT-blue)](NOTICE.md)

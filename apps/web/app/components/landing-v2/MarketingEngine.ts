@@ -27,7 +27,8 @@ export class MarketingEngine {
   private stages: HTMLElement[] = [];
   private steps: HTMLElement[] = [];
   private nodes: HTMLElement[] = [];
-  private edges: (SVGPathElement & { __len?: number })[] = [];
+  private edges: (SVGPathElement & { __len?: number; __on?: boolean })[] = [];
+  private tips: SVGPathElement[] = [];
   private codeLines: HTMLElement[] = [];
   private logLines: HTMLElement[] = [];
   private bar: HTMLElement | null = null;
@@ -103,6 +104,7 @@ export class MarketingEngine {
     this.steps = all('[data-step]');
     this.nodes = all('[data-node]');
     this.edges = all<SVGPathElement>('[data-edge]');
+    this.tips = all<SVGPathElement>('[data-tip]');
     this.codeLines = all('[data-code-line]');
     this.logLines = all('[data-log-line]');
     this.bar = r.querySelector('[data-progress]');
@@ -168,16 +170,27 @@ export class MarketingEngine {
       const hb = host.getBoundingClientRect();
       if (!hb.width || !hb.height) return;
       const box: Record<string, { l: number; t: number; r: number; b: number; cx: number; cy: number }> = {};
+      // The stage graph's nodes animate in with a transform (translate + scale),
+      // and getBoundingClientRect() includes transforms, so measuring a node
+      // that is still "off" would route its connector to the displaced box.
+      // Use the untransformed layout box for that graph (the host is the
+      // positioned offset parent); the hero graph keeps the rect measurement.
+      const useLayoutBox = svg.getAttribute('data-graph') === 'stage';
       host.querySelectorAll<HTMLElement>('[data-gnode]').forEach((n) => {
-        const r = n.getBoundingClientRect();
-        box[n.getAttribute('data-gnode')!] = {
-          l: r.left - hb.left,
-          t: r.top - hb.top,
-          r: r.right - hb.left,
-          b: r.bottom - hb.top,
-          cx: r.left - hb.left + r.width / 2,
-          cy: r.top - hb.top + r.height / 2,
-        };
+        let l: number, t: number, w: number, h: number;
+        if (useLayoutBox && n.offsetParent === host) {
+          l = n.offsetLeft;
+          t = n.offsetTop;
+          w = n.offsetWidth;
+          h = n.offsetHeight;
+        } else {
+          const r = n.getBoundingClientRect();
+          l = r.left - hb.left;
+          t = r.top - hb.top;
+          w = r.width;
+          h = r.height;
+        }
+        box[n.getAttribute('data-gnode')!] = { l, t, r: l + w, b: t + h, cx: l + w / 2, cy: t + h / 2 };
       });
       svg.querySelectorAll<SVGPathElement & { __len?: number; __drawn?: boolean }>('path[data-from]').forEach((p) => {
         const a = box[p.getAttribute('data-from')!];
@@ -185,7 +198,27 @@ export class MarketingEngine {
         if (!a || !b) return;
         let d: string;
         const lim = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-        if (p.getAttribute('data-route') === 'right') {
+        if (svg.getAttribute('data-graph') === 'stage') {
+          // "How it works" canvas: the workspace's connector — straight
+          // orthogonal runs with square corners, ending exactly on the node's
+          // border (the chevron is positioned separately, see below).
+          const r1 = (v: number) => Math.round(v * 2) / 2;
+          const right = p.getAttribute('data-route') === 'right';
+          let ex: number, ey: number;
+          if (right) {
+            const sx = r1(a.r), sy = r1(a.cy);
+            ex = r1(b.l); ey = r1(b.cy);
+            const mx = r1((sx + ex) / 2);
+            d = Math.abs(ey - sy) < 1 ? 'M' + sx + ' ' + sy + ' H' + ex : 'M' + sx + ' ' + sy + ' H' + mx + ' V' + ey + ' H' + ex;
+          } else {
+            const sx = r1(a.cx), sy = r1(a.b);
+            ex = r1(b.cx); ey = r1(b.t);
+            const my = r1((sy + ey) / 2);
+            d = Math.abs(ex - sx) < 1 ? 'M' + sx + ' ' + sy + ' V' + ey : 'M' + sx + ' ' + sy + ' V' + my + ' H' + ex + ' V' + ey;
+          }
+          const tip = svg.querySelector<SVGPathElement>('path[data-tip="' + p.getAttribute('data-edge') + '"]');
+          if (tip) tip.setAttribute('transform', 'translate(' + ex + ' ' + ey + ') rotate(' + (right ? 0 : 90) + ')');
+        } else if (p.getAttribute('data-route') === 'right') {
           const sx = a.r, sy = a.cy, ex = b.l - 1, ey = b.cy;
           const k = lim(Math.abs(ex - sx) * 0.5, 14, 80);
           const bow = Math.abs(ey - sy) < 14 ? -16 : 0;
@@ -199,6 +232,17 @@ export class MarketingEngine {
         p.setAttribute('d', d);
         const len = p.getTotalLength ? p.getTotalLength() : 200;
         p.__len = len;
+        if (svg.getAttribute('data-graph') === 'stage') {
+          // A resize changes the path length; apply the new dash values with
+          // the CSS transition suspended so the line doesn't visibly re-draw.
+          const sp = p as SVGPathElement & { __on?: boolean };
+          sp.style.transition = 'none';
+          sp.style.strokeDasharray = String(len);
+          sp.style.strokeDashoffset = sp.__on === false ? String(len) : '0';
+          void sp.getBoundingClientRect();
+          sp.style.transition = '';
+          return;
+        }
         p.style.strokeDasharray = String(len);
         if (svg.getAttribute('data-graph') === 'hero') {
           if (p.__drawn) {
@@ -283,7 +327,7 @@ export class MarketingEngine {
     this.segBtns.forEach((btn) => {
       const on = btn.getAttribute('data-seg-btn') === mode;
       btn.style.background = on ? pal['--accent'] : 'transparent';
-      btn.style.color = on ? '#FFFFFF' : 'inherit';
+      btn.style.color = on ? pal['--on-accent'] : 'inherit';
       btn.style.opacity = on ? '1' : '.8';
     });
   }
@@ -344,7 +388,7 @@ export class MarketingEngine {
     if (this.nav && nt !== this.navNow) {
       const p = PALETTES[nt];
       this.nav.style.transition = 'background .5s ease, border-color .5s ease, color .5s ease';
-      this.nav.style.background = nt === 'dark' ? 'rgba(7,8,11,.82)' : 'rgba(251,251,252,.86)';
+      this.nav.style.background = nt === 'dark' ? 'rgba(16,17,20,.82)' : 'rgba(245,245,246,.86)';
       this.nav.style.borderBottomColor = p['--line'];
       this.nav.style.color = p['--ink'];
       if (this.cta) {
@@ -417,27 +461,29 @@ export class MarketingEngine {
       });
     };
 
+    // The stage-0 canvas is state-driven, not scroll-scrubbed: each node and
+    // connector flips on once the stage's progress passes its own `data-at`
+    // threshold, and CSS (marketing-v2.css) eases the change over time. That
+    // way a single mouse-wheel notch still plays a smooth, complete
+    // animation instead of jumping the drawing forward in one frame.
+    const stageDone = !motion || idx > 0;
+    const switchOn = (el: Element) => stageDone || local >= (parseFloat(el.getAttribute('data-at') || '0') || 0);
+    this.nodes.forEach((el) => el.setAttribute('data-on', String(switchOn(el))));
+    this.edges.forEach((e, i) => {
+      const on = switchOn(e);
+      e.__on = on;
+      e.style.strokeDashoffset = on ? '0' : String(e.__len || 200);
+      this.tips[i]?.setAttribute('data-on', String(on));
+    });
+
     if (!motion) {
-      reveal(this.nodes, 1);
       reveal(this.codeLines, 1);
       reveal(this.logLines, 1);
-      this.edges.forEach((e) => {
-        e.style.opacity = '1';
-        e.style.strokeDashoffset = '0';
-      });
       return;
     }
 
-    reveal(this.nodes, idx > 0 ? 1 : 0.15 + local * 1.1);
     reveal(this.codeLines, idx > 1 ? 1 : idx < 1 ? 0 : 0.1 + local * 1.25);
     reveal(this.logLines, idx < 2 ? 0 : 0.1 + local * 1.3);
-    this.edges.forEach((e, i) => {
-      const t = idx > 0 ? 1 : clamp01((local - 0.22 - i * 0.15) * 4.2);
-      const len = e.__len || 200;
-      e.style.strokeDasharray = String(len);
-      e.style.strokeDashoffset = (len * (1 - t)).toFixed(1);
-      e.style.opacity = t > 0.01 ? '1' : '0';
-    });
   }
 
   mount() {

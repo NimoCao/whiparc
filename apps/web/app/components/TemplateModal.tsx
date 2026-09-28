@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Icon } from '@iconify/react';
 import { motion } from 'framer-motion';
 import { THEME_PALETTES } from './ui/theme-palette';
-import { spaceGroteskFont, barlowFont, jetBrainsMonoFont, kalamFont } from '../fonts';
+import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
 import './ui/blueprint.css';
 import '../templates/templates.css';
 
@@ -53,7 +53,7 @@ export function TemplateModal({ children }: { children: React.ReactNode }) {
         initial={{ opacity: 0, y: 16, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.2, ease: 'easeOut' }}
-        className={`relative w-full max-w-4xl ${spaceGroteskFont.variable} ${barlowFont.variable} ${jetBrainsMonoFont.variable} ${kalamFont.variable}`}
+        className={`relative w-full max-w-4xl ${spaceGroteskFont.variable} ${barlowFont.variable} ${jetBrainsMonoFont.variable}`}
         style={{ ...(palette as React.CSSProperties), border: '1px solid var(--line)', background: 'var(--panel)', padding: 'clamp(20px,3vw,40px)', fontFamily: 'var(--font-body-marketing), system-ui, sans-serif' }}
         onClick={(e) => e.stopPropagation()}
       >

@@ -8,7 +8,8 @@ import ProfileMenu from '../components/ProfileMenu';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
-import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon, LogoMark } from '../dashboard/NavIcons';
+import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon } from '../dashboard/NavIcons';
+import { BrandLogo } from '../components/brand/BrandLogo';
 import type { PipelineRun, RunRow } from '../lib/types';
 import { useAggregatedRuns } from '../lib/useAggregatedRuns';
 import '../components/ui/blueprint.css';
@@ -122,16 +123,13 @@ export default function RunsPageV2() {
       <aside style={{ width: 216, flex: 'none', borderRight: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', flexDirection: 'column', position: 'sticky', top: 0, alignSelf: 'flex-start', height: '100vh' }}>
         <div style={{ height: 56, flex: 'none', display: 'flex', alignItems: 'center', gap: 9, padding: '0 16px', borderBottom: '1px solid var(--line)' }}>
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <span style={{ width: 24, height: 24, border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <LogoMark size={24} />
-            </span>
-            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, letterSpacing: '-.02em' }}>whiparc</span>
+            <BrandLogo size={24} />
           </Link>
         </div>
         <nav style={{ padding: '14px 10px', display: 'grid', gap: 2 }}>
           {NAV_ITEMS.map((item) => {
             const active = item.key === 'runs';
-            const style: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', fontSize: 14.5, color: active ? '#fff' : 'var(--ink2)', background: active ? 'var(--accent)' : 'transparent' };
+            const style: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', fontSize: 14.5, color: active ? 'var(--on-accent)' : 'var(--ink2)', background: active ? 'var(--accent)' : 'transparent' };
             return (
               <Link key={item.key} href={item.href} className={active ? undefined : 'wp-runs-navlink'} style={style}>
                 {item.icon}
@@ -143,7 +141,7 @@ export default function RunsPageV2() {
         <div style={{ marginTop: 'auto', padding: 12, borderTop: '1px solid var(--line)' }}>
           {isLoggedIn ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-              <span style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-hover)', color: '#fff', fontFamily: 'var(--font-display)', fontSize: 12 }}>
+              <span style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-hover)', color: 'var(--on-accent)', fontFamily: 'var(--font-display)', fontSize: 12 }}>
                 {user.name.slice(0, 2).toUpperCase()}
               </span>
               <div style={{ minWidth: 0 }}>
@@ -186,7 +184,7 @@ export default function RunsPageV2() {
               type="button"
               onClick={() => setShowTriggerNote(true)}
               className="wp-blueprint wp-runs-submit"
-              style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, background: 'var(--accent)', color: '#fff', border: 0, cursor: 'pointer' }}
+              style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}
             >
               <Icon icon="lucide:play" width={12} />
               Trigger run
@@ -233,7 +231,7 @@ export default function RunsPageV2() {
                   key={f.id}
                   type="button"
                   onClick={() => setStatusFilter(f.id)}
-                  style={{ height: 30, padding: '0 13px', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, cursor: 'pointer', border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`, background: active ? 'var(--accent)' : 'transparent', color: active ? '#fff' : 'var(--ink2)' }}
+                  style={{ height: 30, padding: '0 13px', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, cursor: 'pointer', border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`, background: active ? 'var(--accent)' : 'transparent', color: active ? 'var(--on-accent)' : 'var(--ink2)' }}
                 >
                   {f.label}
                 </button>
@@ -321,7 +319,7 @@ export default function RunsPageV2() {
                 <Icon icon="lucide:x" width={14} />
               </button>
             </div>
-            <pre style={{ margin: 0, flex: 1, overflow: 'auto', background: '#07080B', border: '1px solid #1E2233', padding: 14, fontFamily: 'var(--font-mono-marketing), monospace', fontSize: 12, lineHeight: 1.6, color: '#CBD5E1', whiteSpace: 'pre-wrap' }}>
+            <pre style={{ margin: 0, flex: 1, overflow: 'auto', background: '#101114', border: '1px solid #2A2C33', padding: 14, fontFamily: 'var(--font-mono-marketing), monospace', fontSize: 12, lineHeight: 1.6, color: '#CBD5E1', whiteSpace: 'pre-wrap' }}>
               {logsRun.logs || '(no logs recorded for this run)'}
             </pre>
           </div>

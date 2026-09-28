@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Icon } from '@iconify/react';
 import { TemplateDetailContent } from '../../components/TemplateDetailContent';
 import { THEME_PALETTES, type Theme } from '../../components/ui/theme-palette';
-import { spaceGroteskFont, barlowFont, jetBrainsMonoFont, kalamFont } from '../../fonts';
+import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../../fonts';
 import '../../components/ui/blueprint.css';
 import '../templates.css';
 
@@ -35,7 +35,7 @@ export default function TemplateDetailPage() {
 
   return (
     <div
-      className={`${spaceGroteskFont.variable} ${barlowFont.variable} ${jetBrainsMonoFont.variable} ${kalamFont.variable}`}
+      className={`${spaceGroteskFont.variable} ${barlowFont.variable} ${jetBrainsMonoFont.variable}`}
       style={{ ...rootVars, minHeight: '100vh', fontFamily: 'var(--font-body-marketing), system-ui, sans-serif', transition: 'background .3s ease, color .3s ease' }}
     >
       <header style={{ height: 56, display: 'flex', alignItems: 'center', gap: 14, padding: '0 clamp(16px,3vw,28px)', borderBottom: '1px solid var(--line)', position: 'sticky', top: 0, background: 'var(--ground)', zIndex: 20 }}>

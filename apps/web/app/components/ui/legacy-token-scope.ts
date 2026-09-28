@@ -33,7 +33,7 @@ export const LEGACY_TOKEN_SCOPE_STYLE = {
   '--color-border': 'var(--line)',
   '--color-input': 'var(--elevated)',
   '--color-primary': 'var(--accent)',
-  '--color-primary-foreground': '#fff',
+  '--color-primary-foreground': 'var(--on-accent)',
   '--color-secondary': 'var(--elevated)',
   '--color-secondary-foreground': 'var(--ink)',
   '--color-destructive': 'var(--danger)',

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Icon } from '@iconify/react';
 import type { ThemeMode } from './palette';
 import { useMarketingCta } from './useMarketingCta';
+import { BrandLogo } from '../brand/BrandLogo';
 
 const NAV_LINKS = [
   { label: 'How it works', href: '#how' },
@@ -26,9 +27,9 @@ export function Nav({ mode, setMode }: { mode: ThemeMode; setMode: (m: ThemeMode
         position: 'sticky',
         top: 0,
         zIndex: 60,
-        background: 'rgba(7,8,11,.82)',
+        background: 'rgba(16,17,20,.82)',
         backdropFilter: 'blur(14px)',
-        borderBottom: '1px solid #1E2233',
+        borderBottom: '1px solid #2A2C33',
         color: '#FFFFFF',
       }}
     >
@@ -44,27 +45,7 @@ export function Nav({ mode, setMode }: { mode: ThemeMode; setMode: (m: ThemeMode
         }}
       >
         <a href="#top" style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0, whiteSpace: 'nowrap' }}>
-          <span
-            style={{
-              width: 28,
-              height: 28,
-              border: '1px solid currentColor',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM9 14H5a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1v-4a1 1 0 00-1-1z"
-              />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14 15h5M14 19h5" />
-            </svg>
-          </span>
-          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 17, letterSpacing: '-.02em' }}>whiparc</span>
+          <BrandLogo size={28} />
         </a>
 
         <div
@@ -155,8 +136,8 @@ export function Nav({ mode, setMode }: { mode: ThemeMode; setMode: (m: ThemeMode
           data-cta
           style={{
             flexShrink: 0,
-            background: '#6366F1',
-            color: '#FFFFFF',
+            background: '#FF6A3D',
+            color: '#101114',
             fontFamily: 'var(--font-display)',
             fontWeight: 600,
             fontSize: 13,

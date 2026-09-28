@@ -30,26 +30,26 @@ const FOLDER_META: Record<string, { label: string; color: string }> = {
 // instead of falling back to inherited (unstyled) text color.
 const CODE_PALETTES: Record<Theme, Record<string, string>> = {
   dark: {
-    '--code-bg': '#07080B',
-    '--code-tab-bg': '#0D0F16',
-    '--code-border': '#1E2233',
+    '--code-bg': '#101114',
+    '--code-tab-bg': '#17181C',
+    '--code-border': '#2A2C33',
     '--code-tab-text': '#FFFFFF',
     '--code-text': '#CBD5E1',
-    '--code-linenum': '#64748B',
-    '--code-comment': '#94A3B8',
-    '--code-keyword': '#9EA2F9',
+    '--code-linenum': '#7B7E88',
+    '--code-comment': '#A3A6AF',
+    '--code-keyword': '#FF8A63',
     '--code-string': '#F59E0B',
     '--code-type': '#10B981',
   },
   light: {
     '--code-bg': '#F4F5F8',
     '--code-tab-bg': '#FFFFFF',
-    '--code-border': '#E3E6ED',
-    '--code-tab-text': '#0F1220',
+    '--code-border': '#E1E2E6',
+    '--code-tab-text': '#101114',
     '--code-text': '#333B4A',
     '--code-linenum': '#9AA3B5',
     '--code-comment': '#6B7385',
-    '--code-keyword': '#4338CA',
+    '--code-keyword': '#C2410C',
     '--code-string': '#B45309',
     '--code-type': '#047857',
   },
@@ -232,7 +232,7 @@ export function ExportCodePageV2() {
 
   if (!projectId || isLoadingCanvas) {
     return (
-      <div style={{ height: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#07080B', color: '#94A3B8' }}>
+      <div style={{ height: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#101114', color: '#A3A6AF' }}>
         <Icon icon="lucide:loader-2" className="animate-spin" width={28} />
       </div>
     );
@@ -278,7 +278,7 @@ export function ExportCodePageV2() {
             onClick={handleDownloadBundle}
             disabled={isDownloading || bundleFiles.length === 0}
             className="wp-blueprint wp-export-submit"
-            style={{ position: 'relative', height: 30, padding: '0 15px', fontSize: 13, background: 'var(--accent)', color: '#fff', border: 0, cursor: bundleFiles.length === 0 ? 'not-allowed' : 'pointer', opacity: bundleFiles.length === 0 ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 6 }}
+            style={{ position: 'relative', height: 30, padding: '0 15px', fontSize: 13, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: bundleFiles.length === 0 ? 'not-allowed' : 'pointer', opacity: bundleFiles.length === 0 ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <BlueprintCorners />
             <Icon icon={isDownloading ? 'lucide:loader-2' : 'lucide:download'} width={12} className={isDownloading ? 'animate-spin' : undefined} />

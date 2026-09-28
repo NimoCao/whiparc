@@ -141,7 +141,7 @@ export function TeamSwitcher({ teams, currentTeamId, onSelectTeam, onTeamCreated
                 <button
                   type="submit"
                   disabled={isSubmitting || !newTeamName.trim()}
-                  style={{ flex: 1, height: 28, fontSize: 12.5, background: 'var(--accent)', color: '#fff', border: 0, cursor: isSubmitting ? 'default' : 'pointer', opacity: isSubmitting || !newTeamName.trim() ? 0.6 : 1 }}
+                  style={{ flex: 1, height: 28, fontSize: 12.5, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: isSubmitting ? 'default' : 'pointer', opacity: isSubmitting || !newTeamName.trim() ? 0.6 : 1 }}
                 >
                   {isSubmitting ? 'Creating…' : 'Create'}
                 </button>

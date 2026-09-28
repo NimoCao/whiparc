@@ -41,6 +41,12 @@ ShowUninstDetails show
 !include "LogicLib.nsh"
 
 !define MUI_ABORTWARNING
+; Brand assets live next to this script (${__FILEDIR__} keeps the build working
+; no matter which directory makensis is invoked from).
+!define MUI_ICON "${__FILEDIR__}\whiparc.ico"
+!define MUI_UNICON "${__FILEDIR__}\whiparc.ico"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}\welcome.bmp"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}\welcome.bmp"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY

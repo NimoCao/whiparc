@@ -28,7 +28,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ) => {
     const variantStyles = {
       primary:
-        'bg-primary text-white hover:opacity-90 shadow-md shadow-primary/20 hover:shadow-lg active:shadow-inner',
+        'bg-primary text-primary-foreground hover:opacity-90 shadow-md shadow-primary/20 hover:shadow-lg active:shadow-inner',
       secondary:
         'bg-input text-slate-100 hover:bg-input border border-input',
       outline: 'border-2 border-primary text-primary hover:bg-primary/10',
@@ -93,7 +93,7 @@ export const Badge: React.FC<BadgeProps> = ({
   className = '',
 }) => {
   const variantStyles = {
-    primary: 'bg-primary/20 text-indigo-300 border border-primary/30',
+    primary: 'bg-primary/20 text-primary border border-primary/30',
     secondary: 'bg-input/70 text-slate-200 border border-input/40',
     success: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
     warning: 'bg-amber-500/20 text-amber-300 border border-amber-500/30',

@@ -360,7 +360,7 @@ export default function CredentialManagerModal({ isOpen, onClose, projectId, tok
               <button
                 type="submit"
                 disabled={isSaving}
-                className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary hover:bg-primary/90 py-2.5 text-sm font-semibold text-white shadow-md transition disabled:opacity-50 cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary hover:bg-primary/90 py-2.5 text-sm font-semibold text-primary-foreground shadow-md transition disabled:opacity-50 cursor-pointer"
               >
                 {isSaving ? (
                   <>
@@ -742,7 +742,7 @@ export function CredentialManagerTab({ projectId, token, onCredentialsChange }: 
             <button
               type="submit"
               disabled={isSaving}
-              className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary hover:bg-primary/90 py-2.5 text-sm font-semibold text-white shadow-md transition disabled:opacity-50 cursor-pointer"
+              className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary hover:bg-primary/90 py-2.5 text-sm font-semibold text-primary-foreground shadow-md transition disabled:opacity-50 cursor-pointer"
             >
               {isSaving ? (
                 <>

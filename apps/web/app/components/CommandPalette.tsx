@@ -185,7 +185,7 @@ export function CommandPalette({ onClose, projects, navItems }: CommandPalettePr
                       padding: '9px 16px',
                       border: 0,
                       background: i === activeIndex ? 'var(--accent)' : 'transparent',
-                      color: i === activeIndex ? '#fff' : 'var(--ink)',
+                      color: i === activeIndex ? 'var(--on-accent)' : 'var(--ink)',
                       cursor: 'pointer',
                       textAlign: 'left',
                       fontSize: 14,

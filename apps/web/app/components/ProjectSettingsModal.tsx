@@ -85,7 +85,7 @@ const primaryButtonStyle: CSSProperties = {
   height: 36,
   padding: '0 18px',
   background: 'var(--accent)',
-  color: '#fff',
+  color: 'var(--on-accent)',
   border: 0,
   fontSize: 13,
   fontWeight: 600,
@@ -609,7 +609,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                           style={{ padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13, borderTop: i > 0 ? '1px solid var(--line)' : undefined }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div style={{ height: 32, width: 32, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display, inherit)', fontWeight: 700, fontSize: 11, color: '#fff', background: 'var(--accent)' }}>
+                            <div style={{ height: 32, width: 32, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display, inherit)', fontWeight: 700, fontSize: 11, color: 'var(--on-accent)', background: 'var(--accent)' }}>
                               {initials}
                             </div>
                             <div>

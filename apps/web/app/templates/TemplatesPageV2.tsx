@@ -7,8 +7,9 @@ import { useAuthStore } from '../store/useAuthStore';
 import ProfileMenu from '../components/ProfileMenu';
 import { TemplateCard, deriveProStatus } from '../components/TemplateCard';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
-import { spaceGroteskFont, barlowFont, jetBrainsMonoFont, kalamFont } from '../fonts';
-import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon, LogoMark } from '../dashboard/NavIcons';
+import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
+import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon } from '../dashboard/NavIcons';
+import { BrandLogo } from '../components/brand/BrandLogo';
 import type { Template, TemplateListResponse } from '../lib/types';
 import '../components/ui/blueprint.css';
 import './templates.css';
@@ -109,17 +110,14 @@ export default function TemplatesPageV2() {
 
   return (
     <div
-      className={`${spaceGroteskFont.variable} ${barlowFont.variable} ${jetBrainsMonoFont.variable} ${kalamFont.variable}`}
+      className={`${spaceGroteskFont.variable} ${barlowFont.variable} ${jetBrainsMonoFont.variable}`}
       style={{ ...rootVars, display: 'flex', alignItems: 'stretch', minHeight: '100vh', fontSize: 15, lineHeight: 1.55, transition: 'background .3s ease, color .3s ease', fontFamily: 'var(--font-body-marketing), system-ui, sans-serif' }}
     >
       {/* SIDEBAR */}
       <aside style={{ width: 216, flex: 'none', borderRight: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', flexDirection: 'column', position: 'sticky', top: 0, alignSelf: 'flex-start', height: '100vh' }}>
         <div style={{ height: 56, flex: 'none', display: 'flex', alignItems: 'center', gap: 9, padding: '0 16px', borderBottom: '1px solid var(--line)' }}>
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <span style={{ width: 24, height: 24, border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <LogoMark size={24} />
-            </span>
-            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, letterSpacing: '-.02em' }}>whiparc</span>
+            <BrandLogo size={24} />
           </Link>
         </div>
 
@@ -132,7 +130,7 @@ export default function TemplatesPageV2() {
               gap: 10,
               padding: '8px 10px',
               fontSize: 14.5,
-              color: active ? '#fff' : 'var(--ink2)',
+              color: active ? 'var(--on-accent)' : 'var(--ink2)',
               background: active ? 'var(--accent)' : 'transparent',
             };
             return (
@@ -147,7 +145,7 @@ export default function TemplatesPageV2() {
         <div style={{ marginTop: 'auto', padding: 12, borderTop: '1px solid var(--line)' }}>
           {isLoggedIn ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-              <span style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-hover)', color: '#fff', fontFamily: 'var(--font-display)', fontSize: 12 }}>
+              <span style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-hover)', color: 'var(--on-accent)', fontFamily: 'var(--font-display)', fontSize: 12 }}>
                 {user.name.slice(0, 2).toUpperCase()}
               </span>
               <div style={{ minWidth: 0 }}>
@@ -229,7 +227,7 @@ export default function TemplatesPageV2() {
                       cursor: 'pointer',
                       border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
                       background: active ? 'var(--accent)' : 'transparent',
-                      color: active ? '#fff' : 'var(--ink2)',
+                      color: active ? 'var(--on-accent)' : 'var(--ink2)',
                     }}
                   >
                     {cat === 'all' ? 'All' : cat.toUpperCase()}

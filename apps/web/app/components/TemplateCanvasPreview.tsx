@@ -7,12 +7,12 @@ import {
   Background,
   BackgroundVariant,
   Controls,
-  MarkerType,
   type Node,
   type Edge,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import TemplatePreviewNode from './TemplatePreviewNode';
+import BlueprintEdge from './canvas/BlueprintEdge';
 
 interface TemplateCanvasPreviewProps {
   nodes: Node[];
@@ -25,77 +25,18 @@ interface TemplateCanvasPreviewProps {
   interactive?: boolean;
 }
 
-type NodeTech = 'Terraform' | 'Ansible' | 'Kubernetes' | 'Source' | 'Target';
-
-// Mirrors useCanvasStore's onConnect edge-coloring rules (the same logic the
-// real editor uses when a user draws a connection) so a template previews
-// with the same "beautifully connected" gradient/animated look it would have
-// in the workspace — computed here rather than trusted from storage, since
-// hand-written seed/placeholder edges_json won't carry baked-in style/
-// animated fields the way a real editor-authored save does.
-function resolveEdgeVisuals(sourceTech: NodeTech | undefined, targetTech: NodeTech | undefined) {
-  if (sourceTech === 'Source') return { stroke: '#F59E0B', animated: false };
-  if (sourceTech === 'Target') return { stroke: '#14B8A6', animated: false };
-  if (sourceTech === 'Terraform' && targetTech === 'Terraform') return { stroke: '#6366F1', animated: false };
-  if (sourceTech === 'Terraform' && targetTech === 'Ansible') return { stroke: 'url(#grad-tf-ansible)', animated: true };
-  if (sourceTech === 'Ansible' && targetTech === 'Kubernetes') return { stroke: 'url(#grad-ansible-k8s)', animated: false };
-  if (sourceTech === 'Kubernetes' && targetTech === 'Kubernetes') return { stroke: '#0EA5E9', animated: false };
-  return { stroke: '#8B5CF6', animated: false };
-}
-
 function PreviewInner({ nodes, edges, viewport, interactive = true }: TemplateCanvasPreviewProps) {
   const nodeTypes = useMemo(() => ({ customNode: TemplatePreviewNode }), []);
-
-  const styledEdges = useMemo(() => {
-    const techById = new Map(nodes.map((n) => [n.id, (n.data as { tech?: NodeTech })?.tech]));
-    return edges.map((edge) => {
-      const { stroke: defaultStroke, animated: defaultAnimated } = resolveEdgeVisuals(techById.get(edge.source), techById.get(edge.target));
-      const stroke = (edge.style && (edge.style as { stroke?: string }).stroke) || defaultStroke;
-      const markerColor = stroke.startsWith('url(#grad-tf-ansible)')
-        ? '#8B5CF6'
-        : stroke.startsWith('url(#grad-ansible-k8s)')
-        ? '#0EA5E9'
-        : stroke.startsWith('url(')
-        ? '#8B5CF6'
-        : stroke;
-      return {
-        ...edge,
-        style: { stroke, strokeWidth: 2.5 },
-        animated: edge.animated ?? defaultAnimated,
-        markerEnd: edge.markerEnd || {
-          type: MarkerType.ArrowClosed,
-          width: 12,
-          height: 12,
-          color: markerColor,
-        },
-      };
-    });
-  }, [nodes, edges]);
+  // Connector color is derived from each edge's target node at render time
+  // (BlueprintEdge), so stored/seed edges_json needs no baked-in styling.
+  const edgeTypes = useMemo(() => ({ default: BlueprintEdge }), []);
 
   return (
     <ReactFlow
       nodes={nodes}
-      edges={styledEdges}
+      edges={edges}
       nodeTypes={nodeTypes}
-      defaultEdgeOptions={{
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 12,
-          height: 12,
-        },
-        labelStyle: {
-          fill: '#F1F5F9',
-          fontSize: 11,
-          fontWeight: 600,
-        },
-        labelBgStyle: {
-          fill: '#0D0F16',
-          stroke: '#1E2233',
-          strokeWidth: 1,
-        },
-        labelBgPadding: [8, 4],
-        labelBgBorderRadius: 6,
-      }}
+      edgeTypes={edgeTypes}
       defaultViewport={viewport}
       fitView={!viewport}
       fitViewOptions={{ padding: 0.25 }}
@@ -112,21 +53,6 @@ function PreviewInner({ nodes, edges, viewport, interactive = true }: TemplateCa
     >
       <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="opacity-40" />
       {interactive && <Controls showInteractive={false} />}
-
-      {/* SVG gradient defs referenced by resolveEdgeVisuals — mirrors the
-          hidden defs block in workspace/page.tsx's canvas. */}
-      <svg style={{ position: 'absolute', width: 0, height: 0 }}>
-        <defs>
-          <linearGradient id="grad-tf-ansible" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#6366F1" />
-            <stop offset="100%" stopColor="#8B5CF6" />
-          </linearGradient>
-          <linearGradient id="grad-ansible-k8s" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#8B5CF6" />
-            <stop offset="100%" stopColor="#0EA5E9" />
-          </linearGradient>
-        </defs>
-      </svg>
     </ReactFlow>
   );
 }

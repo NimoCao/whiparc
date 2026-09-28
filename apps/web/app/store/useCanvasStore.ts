@@ -3,13 +3,13 @@ import {
     Connection,
     Edge,
     EdgeChange,
-    MarkerType,
     Node,
     NodeChange,
     addEdge,
     applyNodeChanges,
     applyEdgeChanges,
 } from '@xyflow/react';
+import { edgeCustomStroke, edgeStrokeWidth } from '../lib/canvasDesign';
 
 export type NodeExecutionStatus = 'idle' | 'pending' | 'running' | 'completed' | 'failed';
 
@@ -140,58 +140,12 @@ export const getInitialNodes = (): Node[] => [
   }
 ];
 
-export const resolveMarkerColor = (stroke: string): string => {
-  if (stroke.startsWith('url(#grad-tf-ansible)')) return '#8B5CF6';
-  if (stroke.startsWith('url(#grad-ansible-k8s)')) return '#0EA5E9';
-  if (stroke.startsWith('url(')) return '#8B5CF6';
-  return stroke;
-};
-
-// Initial edges matching the design-idea connection layouts and styling
+// Initial edges. No style is stored: BlueprintEdge derives each connector's
+// color from its target node's tech at render time.
 export const getInitialEdges = (): Edge[] => [
-  {
-    id: 'e_sg_instance',
-    source: 'aws_security_group.web_sg',
-    target: 'aws_instance.web_server',
-    style: { stroke: '#6366F1', strokeWidth: 2.5 },
-    animated: false,
-    markerEnd: {
-      type: MarkerType.Arrow,
-      width: 12,
-      height: 12,
-      strokeWidth: 1.6,
-      color: '#6366F1',
-    },
-  },
-  {
-    id: 'e_instance_nginx',
-    source: 'aws_instance.web_server',
-    target: 'install_nginx.yml',
-    style: { stroke: 'url(#grad-tf-ansible)', strokeWidth: 2.5 },
-    className: 'animate-dash-flow',
-    animated: true,
-    markerEnd: {
-      type: MarkerType.Arrow,
-      width: 12,
-      height: 12,
-      strokeWidth: 1.6,
-      color: '#8B5CF6',
-    },
-  },
-  {
-    id: 'e_nginx_assets',
-    source: 'install_nginx.yml',
-    target: 'deploy_site_assets',
-    style: { stroke: '#8B5CF6', strokeWidth: 2.5 },
-    animated: false,
-    markerEnd: {
-      type: MarkerType.Arrow,
-      width: 12,
-      height: 12,
-      strokeWidth: 1.6,
-      color: '#8B5CF6',
-    },
-  }
+  { id: 'e_sg_instance', source: 'aws_security_group.web_sg', target: 'aws_instance.web_server' },
+  { id: 'e_instance_nginx', source: 'aws_instance.web_server', target: 'install_nginx.yml' },
+  { id: 'e_nginx_assets', source: 'install_nginx.yml', target: 'deploy_site_assets' },
 ];
 
 // Create the Zustand store
@@ -217,8 +171,11 @@ const useCanvasStore = create<CanvasState>((set, get) => ({
     setSaveStatus: (saveStatus) => set({ saveStatus }),
     setVersion: (version) => set({ version }),
 
-    setSelectedNodeId: (id) => set({ selectedNodeId: id }),
-    setSelectedEdgeId: (id) => set({ selectedEdgeId: id }),
+    // The inspector shows one subject at a time, so a node and an edge can't be
+    // selected together: selecting either clears the other. (Passing null only
+    // clears its own side, so closing a panel doesn't disturb the other.)
+    setSelectedNodeId: (id) => set(id ? { selectedNodeId: id, selectedEdgeId: null } : { selectedNodeId: null }),
+    setSelectedEdgeId: (id) => set(id ? { selectedEdgeId: id, selectedNodeId: null } : { selectedEdgeId: null }),
     
     updateNodeData: (nodeId, newData) => {
         set((state) => ({
@@ -240,39 +197,38 @@ const useCanvasStore = create<CanvasState>((set, get) => ({
     updateEdgeData: (edgeId: string, label: string, animated: boolean, stroke: string, strokeWidth: number) => {
         set((state) => ({
             edges: state.edges.map((edge) => {
-                if (edge.id === edgeId) {
-                    return {
-                        ...edge,
-                        label: label || undefined,
-                        labelStyle: {
-                            fill: '#F1F5F9',
-                            fontSize: 11,
-                            fontWeight: 600,
-                        },
-                        labelBgStyle: {
-                            fill: '#0D0F16',
-                            stroke: '#1E2233',
-                            strokeWidth: 1,
-                        },
-                        labelBgPadding: [8, 4] as [number, number],
-                        labelBgBorderRadius: 6,
-                        animated,
-                        className: animated ? 'animate-dash-flow' : '',
-                        style: {
-                            ...edge.style,
-                            stroke,
-                            strokeWidth
-                        },
-                        markerEnd: {
-                            type: MarkerType.Arrow,
-                            width: 12,
-                            height: 12,
-                            strokeWidth: 1.6,
-                            color: resolveMarkerColor(stroke),
-                        },
-                    };
-                }
-                return edge;
+                if (edge.id !== edgeId) return edge;
+
+                // The inspector round-trips the current color and thickness on
+                // every edit (label, dash toggle, ...). Only a value that
+                // differs from what the connector currently shows is a user
+                // override; an empty stroke means "auto" (derived from the
+                // target node by BlueprintEdge).
+                const hadCustomStroke = edgeCustomStroke(edge) !== undefined;
+                const clearedColor = stroke === '' && hadCustomStroke; // the inspector's "Auto"
+                const colorChanged = !clearedColor && stroke !== (edgeCustomStroke(edge) ?? '');
+                const widthChanged = strokeWidth !== edgeStrokeWidth(edge);
+
+                const style = {
+                    ...edge.style,
+                    ...(colorChanged ? { stroke } : {}),
+                    ...(widthChanged ? { strokeWidth } : {}),
+                };
+                if (clearedColor) delete style.stroke;
+
+                return {
+                    ...edge,
+                    label: label || undefined,
+                    animated,
+                    className: animated ? 'animate-dash-flow' : '',
+                    data: {
+                        ...edge.data,
+                        ...(clearedColor ? { customStroke: false } : {}),
+                        ...(colorChanged ? { customStroke: true } : {}),
+                        ...(widthChanged ? { customWidth: true } : {}),
+                    },
+                    style,
+                };
             })
         }));
     },
@@ -317,49 +273,12 @@ const useCanvasStore = create<CanvasState>((set, get) => ({
     },
     
     onConnect: (connection: Connection) => {
-        // Resolve technology of source and target to determine edge styles
-        const sourceNode = get().nodes.find(n => n.id === connection.source);
-        const targetNode = get().nodes.find(n => n.id === connection.target);
-        
-        let stroke = '#8B5CF6'; // Default Ansible color
-        let className = '';
-        let animated = false;
-
-        if (sourceNode && targetNode) {
-          const sourceTech = sourceNode.data.tech;
-          const targetTech = targetNode.data.tech;
-
-          if (sourceTech === 'Source') {
-            stroke = '#F59E0B';
-          } else if (sourceTech === 'Target') {
-            stroke = '#14B8A6';
-          } else if (sourceTech === 'Terraform' && targetTech === 'Terraform') {
-            stroke = '#6366F1';
-          } else if (sourceTech === 'Terraform' && targetTech === 'Ansible') {
-            stroke = 'url(#grad-tf-ansible)';
-            className = 'animate-dash-flow';
-            animated = true;
-          } else if (sourceTech === 'Ansible' && targetTech === 'Kubernetes') {
-            stroke = 'url(#grad-ansible-k8s)';
-          } else if (sourceTech === 'Kubernetes' && targetTech === 'Kubernetes') {
-            stroke = '#0EA5E9';
-          }
-        }
-
+        // Connector color/thickness are derived at render time (BlueprintEdge),
+        // so a new edge only needs its endpoints.
         const newEdge: Edge = {
           id: `reactflow__edge-${connection.source}-${connection.target}`,
           source: connection.source,
           target: connection.target,
-          style: { stroke, strokeWidth: 2.5 },
-          className,
-          animated,
-          markerEnd: {
-            type: MarkerType.Arrow,
-            width: 12,
-            height: 12,
-            strokeWidth: 1.6,
-            color: resolveMarkerColor(stroke),
-          },
         };
 
         set({
