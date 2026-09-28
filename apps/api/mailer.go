@@ -40,6 +40,7 @@ func sanitizeName(name string) string {
 // EmailSender defines the interface for delivering outbound transactional emails.
 type EmailSender interface {
 	SendVerificationEmail(toEmail, toName, verificationLink string) error
+	SendInviteEmail(toEmail, teamName, inviterName, acceptLink string) error
 }
 
 // ConsoleMailer logs transactional emails directly to the server logs for local development.
@@ -53,6 +54,18 @@ func (c *ConsoleMailer) SendVerificationEmail(toEmail, toName, verificationLink 
 	divider := strings.Repeat("=", 70)
 	log.Printf("\n%s\n[EMAIL DISPATCH - LOCAL/DEV CONSOLE MODE]\nTo: %s <%s>\nSubject: Verify your Whiparc account\nAction Link: %s\nExpires: in 24 hours\n%s\n",
 		divider, cleanName, cleanEmail, cleanLink, divider)
+	return nil
+}
+
+func (c *ConsoleMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLink string) error {
+	cleanEmail := sanitizeHeaderField(toEmail)
+	cleanTeam := sanitizeHeaderField(teamName)
+	cleanInviter := sanitizeName(inviterName)
+	cleanLink := sanitizeHeaderField(acceptLink)
+
+	divider := strings.Repeat("=", 70)
+	log.Printf("\n%s\n[EMAIL DISPATCH - LOCAL/DEV CONSOLE MODE]\nTo: %s\nSubject: %s invited you to join %s on Whiparc\nAction Link: %s\nExpires: in 7 days\n%s\n",
+		divider, cleanEmail, cleanInviter, cleanTeam, cleanLink, divider)
 	return nil
 }
 
@@ -128,6 +141,73 @@ func (r *ResendMailer) SendVerificationEmail(toEmail, toName, verificationLink s
 	return nil
 }
 
+func (r *ResendMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLink string) error {
+	cleanEmail := sanitizeHeaderField(toEmail)
+	cleanTeam := sanitizeName(teamName)
+	cleanInviter := sanitizeName(inviterName)
+	cleanLink := sanitizeHeaderField(acceptLink)
+
+	escapedTeam := html.EscapeString(cleanTeam)
+	escapedInviter := html.EscapeString(cleanInviter)
+	escapedLink := html.EscapeString(cleanLink)
+
+	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>You've been invited to Whiparc</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d1117; color: #c9d1d9; padding: 40px 20px;">
+  <div style="max-width: 560px; margin: 0 auto; background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px;">
+    <h1 style="color: #58a6ff; font-size: 24px; margin-top: 0;">You're invited to %s</h1>
+    <p style="font-size: 15px; line-height: 1.6; color: #8b949e;">%s invited you to join their team on Whiparc.</p>
+    <div style="margin: 32px 0; text-align: center;">
+      <a href="%s" style="display: inline-block; background-color: #238636; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 16px;">Accept Invite</a>
+    </div>
+    <p style="font-size: 13px; color: #8b949e;">Or copy and paste this link into your browser:</p>
+    <p style="font-size: 12px; color: #58a6ff; word-break: break-all;">%s</p>
+    <hr style="border: 0; border-top: 1px solid #30363d; margin: 32px 0 16px 0;" />
+    <p style="font-size: 12px; color: #484f58; margin: 0;">If you weren't expecting this invite, you can safely ignore this email. This link will expire in 7 days.</p>
+  </div>
+</body>
+</html>`, escapedTeam, escapedInviter, escapedLink, escapedLink)
+
+	textBody := fmt.Sprintf("You're invited to %s\n\n%s invited you to join their team on Whiparc. Open the following link to accept:\n%s\n\nThis link expires in 7 days.", cleanTeam, cleanInviter, cleanLink)
+
+	payload := map[string]interface{}{
+		"from":    r.from,
+		"to":      []string{cleanEmail},
+		"subject": fmt.Sprintf("%s invited you to join %s on Whiparc", cleanInviter, cleanTeam),
+		"html":    htmlBody,
+		"text":    textBody,
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", "https://api.resend.com/emails", bytes.NewReader(payloadJSON))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+r.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("resend api request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("resend returned status code %d", resp.StatusCode)
+	}
+
+	log.Printf("[EMAIL] Invite email sent to %s via Resend\n", cleanEmail)
+	return nil
+}
+
 // SMTPMailer sends emails via standard SMTP server.
 type SMTPMailer struct {
 	host string
@@ -170,6 +250,54 @@ func (s *SMTPMailer) SendVerificationEmail(toEmail, toName, verificationLink str
 	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
 	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
 	body := fmt.Sprintf("Welcome to Whiparc, %s!\r\n\r\nPlease verify your email address by clicking the link below:\r\n%s\r\n\r\nThis link will expire in 24 hours.\r\n", cleanName, safeLink)
+
+	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
+
+	var auth smtp.Auth
+	if s.user != "" {
+		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
+	}
+
+	fromEnvelope := cleanFrom
+	if fromParsed, err := mail.ParseAddress(cleanFrom); err == nil && fromParsed.Address != "" {
+		fromEnvelope = fromParsed.Address
+	}
+
+	return s.sendMail(addr, auth, fromEnvelope, []string{parsedTo.Address}, msg)
+}
+
+func (s *SMTPMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLink string) error {
+	parsedTo, err := mail.ParseAddress(toEmail)
+	if err != nil {
+		return fmt.Errorf("invalid recipient address: %w", err)
+	}
+
+	parsedURL, err := url.ParseRequestURI(acceptLink)
+	if err != nil {
+		return fmt.Errorf("invalid invite link: %w", err)
+	}
+	safeLink := parsedURL.String()
+
+	cleanTeam := sanitizeName(teamName)
+	cleanInviter := sanitizeName(inviterName)
+	cleanFrom := sanitizeHeaderField(s.from)
+	if cleanFrom == "" {
+		cleanFrom = "noreply@whiparc.com"
+	}
+
+	fromAddress := cleanFrom
+	if fromParsed, err := mail.ParseAddress(cleanFrom); err == nil {
+		fromAddress = fromParsed.String()
+	}
+
+	toAddress := parsedTo.String()
+
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	subject := fmt.Sprintf("Subject: %s invited you to join %s on Whiparc\r\n", cleanInviter, cleanTeam)
+	fromHeader := fmt.Sprintf("From: %s\r\n", fromAddress)
+	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
+	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
+	body := fmt.Sprintf("%s invited you to join %s on Whiparc.\r\n\r\nOpen the following link to accept:\r\n%s\r\n\r\nThis link will expire in 7 days.\r\n", cleanInviter, cleanTeam, safeLink)
 
 	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
 

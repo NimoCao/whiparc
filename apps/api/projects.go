@@ -1187,19 +1187,38 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 }
 
 type CredentialItem struct {
-	ID             string `json:"id"`
-	ProjectID      string `json:"project_id"`
-	Provider       string `json:"provider"`
-	Name           string `json:"name"`
-	KeyFingerprint string `json:"key_fingerprint"`
-	CreatedAt      string `json:"created_at"`
+	ID             string  `json:"id"`
+	ProjectID      string  `json:"project_id"`
+	Provider       string  `json:"provider"`
+	Name           string  `json:"name"`
+	KeyFingerprint string  `json:"key_fingerprint"`
+	ExpiresAt      *string `json:"expires_at,omitempty"`
+	CreatedAt      string  `json:"created_at"`
 }
+
+// scanCredentialItem centralizes the expires_at NULL-handling shared by
+// every query that returns a CredentialItem (project-scoped and
+// team-scoped alike) instead of duplicating the sql.NullString dance.
+func scanCredentialItem(scanner interface{ Scan(...any) error }) (CredentialItem, error) {
+	var item CredentialItem
+	var expiresAt sql.NullString
+	err := scanner.Scan(&item.ID, &item.ProjectID, &item.Provider, &item.Name, &item.KeyFingerprint, &expiresAt, &item.CreatedAt)
+	if err != nil {
+		return item, err
+	}
+	if expiresAt.Valid {
+		item.ExpiresAt = &expiresAt.String
+	}
+	return item, nil
+}
+
+const credentialItemColumns = "id, project_id, provider, name, key_fingerprint, expires_at, created_at"
 
 // GET /api/projects/{id}/credentials
 func handleGetProjectCredentials(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
 
-	rows, err := db.Query("SELECT id, project_id, provider, name, key_fingerprint, created_at FROM cloud_credentials WHERE project_id = ? ORDER BY created_at DESC", projectID)
+	rows, err := db.Query("SELECT "+credentialItemColumns+" FROM cloud_credentials WHERE project_id = ? ORDER BY created_at DESC", projectID)
 	if err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1208,8 +1227,8 @@ func handleGetProjectCredentials(w http.ResponseWriter, r *http.Request) {
 
 	var items []CredentialItem = []CredentialItem{}
 	for rows.Next() {
-		var item CredentialItem
-		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Provider, &item.Name, &item.KeyFingerprint, &item.CreatedAt); err == nil {
+		item, err := scanCredentialItem(rows)
+		if err == nil {
 			items = append(items, item)
 		}
 	}
@@ -1223,6 +1242,21 @@ func handleGetProjectCredentials(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(items)
 }
 
+// parseOptionalExpiresAt parses an optional RFC3339 expiry string shared by
+// credential create and rotate — nil/empty means "no expiry", anything else
+// must be a valid RFC3339 timestamp. database/sql converts a nil *time.Time
+// arg to SQL NULL, so callers can pass the return value straight to Exec.
+func parseOptionalExpiresAt(raw *string) (*time.Time, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, *raw)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
 // POST /api/projects/{id}/credentials
 func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
@@ -1233,9 +1267,10 @@ func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Name     string `json:"name"`
-		Provider string `json:"provider"`
-		RawData  string `json:"raw_data"`
+		Name      string  `json:"name"`
+		Provider  string  `json:"provider"`
+		RawData   string  `json:"raw_data"`
+		ExpiresAt *string `json:"expires_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
@@ -1252,6 +1287,12 @@ func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expiresAt, err := parseOptionalExpiresAt(payload.ExpiresAt)
+	if err != nil {
+		http.Error(w, "Invalid expires_at: must be an RFC3339 timestamp", http.StatusBadRequest)
+		return
+	}
+
 	cipherText, nonce, authTag, err := vault.Encrypt([]byte(payload.RawData))
 	if err != nil {
 		http.Error(w, "Vault encryption failed: "+err.Error(), http.StatusInternalServerError)
@@ -1261,8 +1302,8 @@ func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 	fingerprint := vault.Fingerprint(payload.Provider, []byte(payload.RawData))
 	credID := generateUUID()
 
-	_, err = db.Exec("INSERT INTO cloud_credentials (id, project_id, provider, name, encrypted_data, nonce, auth_tag, key_fingerprint, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		credID, projectID, payload.Provider, payload.Name, cipherText, nonce, authTag, fingerprint, user.ID)
+	_, err = db.Exec("INSERT INTO cloud_credentials (id, project_id, provider, name, encrypted_data, nonce, auth_tag, key_fingerprint, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		credID, projectID, payload.Provider, payload.Name, cipherText, nonce, authTag, fingerprint, expiresAt, user.ID)
 	if err != nil {
 		http.Error(w, "Failed to save credential: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1276,6 +1317,109 @@ func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 		"id":              credID,
 		"message":         "Credential saved securely",
 		"key_fingerprint": fingerprint,
+	})
+}
+
+// POST /api/projects/{id}/credentials/{credId}/rotate — product-memory 08.5
+// item D1. Re-encrypts the same credential row in place (same id) with a new
+// secret value, rather than delete+recreate, so anything referencing the
+// credential by id (e.g. a canvas node's credentialId) doesn't need updating.
+func handleRotateProjectCredential(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	credID := r.PathValue("credId")
+	user, ok := GetUserFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var payload struct {
+		RawData   string  `json:"raw_data"`
+		ExpiresAt *string `json:"expires_at"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(payload.RawData) == "" {
+		http.Error(w, "Missing raw_data in payload", http.StatusBadRequest)
+		return
+	}
+
+	expiresAt, err := parseOptionalExpiresAt(payload.ExpiresAt)
+	if err != nil {
+		http.Error(w, "Invalid expires_at: must be an RFC3339 timestamp", http.StatusBadRequest)
+		return
+	}
+
+	// provider is intentionally not caller-supplied on rotate — it's fixed
+	// at creation time (vault.Fingerprint needs it to mask the new value the
+	// same way the original was masked), and name is only needed here for
+	// the activity log.
+	var provider, name string
+	err = db.QueryRow("SELECT provider, name FROM cloud_credentials WHERE id = ? AND project_id = ?", credID, projectID).Scan(&provider, &name)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Credential not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	cipherText, nonce, authTag, err := vault.Encrypt([]byte(payload.RawData))
+	if err != nil {
+		http.Error(w, "Vault encryption failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fingerprint := vault.Fingerprint(provider, []byte(payload.RawData))
+
+	_, err = db.Exec("UPDATE cloud_credentials SET encrypted_data = ?, nonce = ?, auth_tag = ?, key_fingerprint = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?",
+		cipherText, nonce, authTag, fingerprint, expiresAt, credID, projectID)
+	if err != nil {
+		http.Error(w, "Failed to rotate credential: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	insertActivityEvent(projectID, user.ID, "credential.rotated", map[string]interface{}{"name": name, "provider": provider})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":         "Credential rotated successfully",
+		"key_fingerprint": fingerprint,
+	})
+}
+
+// POST /api/projects/{id}/credentials/{credId}/test — product-memory 08.5
+// item D3. Decrypts the credential server-side and makes a real, read-only
+// call against the provider's own API to confirm it authenticates — never
+// returns the decrypted value itself, only a success/message summary.
+func handleTestProjectCredential(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	credID := r.PathValue("credId")
+
+	var provider string
+	var encryptedData, nonce, authTag []byte
+	err := db.QueryRow("SELECT provider, encrypted_data, nonce, auth_tag FROM cloud_credentials WHERE id = ? AND project_id = ?", credID, projectID).Scan(&provider, &encryptedData, &nonce, &authTag)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Credential not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	decrypted, err := vault.Decrypt(encryptedData, nonce, authTag)
+	if err != nil {
+		http.Error(w, "Failed to decrypt credential: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	success, message := testCredentialConnection(provider, decrypted)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": success,
+		"message": message,
 	})
 }
 

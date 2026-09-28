@@ -308,6 +308,15 @@ func main() {
 	// Team Routes
 	mux.Handle("GET /api/teams", AuthMiddleware(http.HandlerFunc(handleGetTeams)))
 	mux.Handle("POST /api/teams", AuthMiddleware(http.HandlerFunc(handleCreateTeam)))
+	mux.Handle("GET /api/teams/{id}/members", AuthMiddleware(RequireTeamRole("MEMBER")(http.HandlerFunc(handleGetTeamMembers))))
+	mux.Handle("PATCH /api/teams/{id}/members/{userId}", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleUpdateTeamMemberRole))))
+	mux.Handle("DELETE /api/teams/{id}/members/{userId}", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleRemoveTeamMember))))
+	mux.Handle("GET /api/teams/{id}/credentials", AuthMiddleware(RequireTeamRole("MEMBER")(http.HandlerFunc(handleGetTeamCredentials))))
+	mux.Handle("GET /api/teams/{id}/runs", AuthMiddleware(RequireTeamRole("MEMBER")(http.HandlerFunc(handleGetTeamRuns))))
+	mux.Handle("POST /api/teams/{id}/invites", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleCreateTeamInvite))))
+	mux.Handle("GET /api/teams/{id}/invites", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleListTeamInvites))))
+	mux.Handle("DELETE /api/teams/{id}/invites/{inviteId}", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleRevokeTeamInvite))))
+	mux.Handle("POST /api/invites/{token}/accept", AuthMiddleware(http.HandlerFunc(handleAcceptInvite)))
 
 	// Project Routes
 	mux.Handle("GET /api/projects", AuthMiddleware(http.HandlerFunc(handleGetProjects)))
@@ -324,6 +333,8 @@ func main() {
 	mux.Handle("GET /api/projects/{id}/credentials", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetProjectCredentials))))
 	mux.Handle("POST /api/projects/{id}/credentials", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleCreateProjectCredential))))
 	mux.Handle("DELETE /api/projects/{id}/credentials/{credId}", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleDeleteProjectCredential))))
+	mux.Handle("POST /api/projects/{id}/credentials/{credId}/rotate", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleRotateProjectCredential))))
+	mux.Handle("POST /api/projects/{id}/credentials/{credId}/test", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleTestProjectCredential))))
 	mux.Handle("POST /api/projects/{id}/templates", AuthMiddleware(RequireProjectRole("ADMIN")(http.HandlerFunc(handlePublishProjectAsTemplate))))
 	mux.Handle("GET /api/projects/{id}/members", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetProjectMembers))))
 	mux.Handle("POST /api/projects/{id}/members", AuthMiddleware(RequireProjectRole("ADMIN")(http.HandlerFunc(handleAddProjectMember))))
