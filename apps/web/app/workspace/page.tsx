@@ -3502,7 +3502,11 @@ function WorkspaceContent() {
       const apiHost = process.env.NEXT_PUBLIC_API_URL
         ? process.env.NEXT_PUBLIC_API_URL.replace(/^http/, 'ws')
         : 'ws://localhost:8080';
-      const wsUrl = `${apiHost}/api/ws/runs/${runId}`;
+      // A browser's WebSocket API can't set an Authorization header on the
+      // upgrade request, so the token travels as a query param instead —
+      // handleWebSocket (apps/api/main.go) now requires this since it sits
+      // behind AuthMiddleware (see product-memory 08.5 item C3).
+      const wsUrl = `${apiHost}/api/ws/runs/${runId}?token=${encodeURIComponent(activeToken ?? '')}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -3595,7 +3599,11 @@ function WorkspaceContent() {
       const apiHost = process.env.NEXT_PUBLIC_API_URL
         ? process.env.NEXT_PUBLIC_API_URL.replace(/^http/, 'ws')
         : 'ws://localhost:8080';
-      const wsUrl = `${apiHost}/api/ws/runs/${runId}`;
+      // A browser's WebSocket API can't set an Authorization header on the
+      // upgrade request, so the token travels as a query param instead —
+      // handleWebSocket (apps/api/main.go) now requires this since it sits
+      // behind AuthMiddleware (see product-memory 08.5 item C3).
+      const wsUrl = `${apiHost}/api/ws/runs/${runId}?token=${encodeURIComponent(activeToken ?? '')}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -3678,7 +3686,11 @@ function WorkspaceContent() {
       const apiHost = process.env.NEXT_PUBLIC_API_URL
         ? process.env.NEXT_PUBLIC_API_URL.replace(/^http/, 'ws')
         : 'ws://localhost:8080';
-      const wsUrl = `${apiHost}/api/ws/runs/${runId}`;
+      // A browser's WebSocket API can't set an Authorization header on the
+      // upgrade request, so the token travels as a query param instead —
+      // handleWebSocket (apps/api/main.go) now requires this since it sits
+      // behind AuthMiddleware (see product-memory 08.5 item C3).
+      const wsUrl = `${apiHost}/api/ws/runs/${runId}?token=${encodeURIComponent(activeToken ?? '')}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 

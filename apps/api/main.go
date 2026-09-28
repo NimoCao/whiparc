@@ -45,6 +45,7 @@ func truncateLogs(logs string) string {
 
 type PipelineRun struct {
 	ID          string           `json:"id"`
+	ProjectID   *string          `json:"projectId"`
 	Status      string           `json:"status"` // PENDING, RUNNING, SUCCESS, FAILED
 	Logs        string           `json:"logs"`
 	Canvas      string           `json:"canvas"`
@@ -284,11 +285,11 @@ func main() {
 
 	// API Routes
 	mux.Handle("GET /api/projects/{id}/runs", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetRuns))))
-	mux.HandleFunc("GET /api/runs/{id}", enableCORS(handleGetRunByID))
+	mux.Handle("GET /api/runs/{id}", AuthMiddleware(http.HandlerFunc(handleGetRunByID)))
 	mux.Handle("POST /api/projects/{id}/deploy", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleDeploy))))
 	mux.Handle("POST /api/projects/{id}/destroy", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleDestroy))))
 	mux.Handle("POST /api/projects/{id}/plan", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handlePlan))))
-	mux.HandleFunc("/api/ws/runs/{id}", handleWebSocket)
+	mux.Handle("/api/ws/runs/{id}", AuthMiddleware(http.HandlerFunc(handleWebSocket)))
 
 	// Auth & Workspace Sync Routes
 	mux.HandleFunc("POST /api/auth/signup", enableCORS(handleSignup))
@@ -476,14 +477,14 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 // from before the user_id column even existed — still return, with
 // name/email as SQL NULL, surfaced as triggeredBy: null client-side. See
 // obsidian_memory/08.6 section 2.3.
-const runsWithTriggeredByQuery = `SELECT pr.id, pr.status, pr.logs, pr.canvas, pr.run_type, pr.target,
+const runsWithTriggeredByQuery = `SELECT pr.id, pr.project_id, pr.status, pr.logs, pr.canvas, pr.run_type, pr.target,
        pr.user_id, u.name, u.email, pr.created_at, pr.updated_at
 FROM pipeline_runs pr
 LEFT JOIN users u ON pr.user_id = u.id`
 
 func scanPipelineRun(scanner interface{ Scan(...any) error }) (PipelineRun, error) {
 	var run PipelineRun
-	var runType, target, userID, userName, userEmail sql.NullString
+	var projectID, runType, target, userID, userName, userEmail sql.NullString
 	// Scanned directly into time.Time rather than a string re-parsed with a
 	// fixed layout: modernc.org/sqlite returns a DATETIME column's value
 	// already as RFC3339 ("2026-09-22T11:40:14Z") when the destination is a
@@ -493,10 +494,13 @@ func scanPipelineRun(scanner interface{ Scan(...any) error }) (PipelineRun, erro
 	// at Go's zero value and rendering as "739880d ago" client-side. Both
 	// database/sql drivers used here (modernc.org/sqlite, pgx/v5/stdlib)
 	// natively support scanning a timestamp column straight into time.Time.
-	err := scanner.Scan(&run.ID, &run.Status, &run.Logs, &run.Canvas, &runType, &target,
+	err := scanner.Scan(&run.ID, &projectID, &run.Status, &run.Logs, &run.Canvas, &runType, &target,
 		&userID, &userName, &userEmail, &run.CreatedAt, &run.UpdatedAt)
 	if err != nil {
 		return run, err
+	}
+	if projectID.Valid {
+		run.ProjectID = &projectID.String
 	}
 	if runType.Valid {
 		run.RunType = &runType.String
@@ -537,6 +541,17 @@ func handleGetRuns(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(runs)
 }
 
+// handleGetRunByID is project-scoped like every other /api/projects/{id}/...
+// route, even though its own path only carries a run ID — a run's logs can
+// contain real infrastructure detail (targets, node output), so it must not
+// be readable by anyone who merely learns or guesses a run ID. Resolves the
+// run first, then applies the same checkProjectAccess check RequireProjectRole
+// runs as middleware, using the run's own project_id. A run with no
+// project_id (only possible for rows that predate that column) is treated as
+// not found, since there is nothing to authorize it against. See
+// obsidian_memory/08.5 item C3 for how this gap was found (this handler was
+// registered with no auth at all until then, just never linked to from
+// anywhere in the app).
 func handleGetRunByID(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
@@ -553,6 +568,18 @@ func handleGetRunByID(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	user, _ := GetUserFromContext(r) // guaranteed present: this route is behind AuthMiddleware
+	if run.ProjectID == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Run not found"})
+		return
+	}
+	if allowed, status, message := checkProjectAccess(user.ID, *run.ProjectID, "VIEWER"); !allowed {
+		http.Error(w, message, status)
 		return
 	}
 
@@ -968,10 +995,30 @@ func handlePlan(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+// handleWebSocket streams a run's live log/status/node-status events. Like
+// handleGetRunByID (see its comment), this must be project-scoped — a live
+// log tail is at least as sensitive as the at-rest logs GET returns, often
+// more so, since it's the full untruncated stream. Sits behind AuthMiddleware
+// like every other authenticated route; AuthMiddleware already accepts a
+// `token` query parameter as a fallback to the Authorization header, which is
+// what a browser's WebSocket API needs since it can't set custom headers on
+// the upgrade request.
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		http.Error(w, "Missing run ID", http.StatusBadRequest)
+		return
+	}
+
+	user, _ := GetUserFromContext(r) // guaranteed present: this route is behind AuthMiddleware
+
+	var projectID sql.NullString
+	if err := db.QueryRow("SELECT project_id FROM pipeline_runs WHERE id = ?", id).Scan(&projectID); err != nil || !projectID.Valid {
+		http.Error(w, "Run not found", http.StatusNotFound)
+		return
+	}
+	if allowed, status, message := checkProjectAccess(user.ID, projectID.String, "VIEWER"); !allowed {
+		http.Error(w, message, status)
 		return
 	}
 
