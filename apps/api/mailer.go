@@ -12,29 +12,35 @@ import (
 	"net/smtp"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// crlfPattern strips CR, LF, and null bytes — the characters that matter for
+// SMTP header/command injection (CWE-640) and for prematurely terminating
+// the DATA section (a lone "." on its own line). Every string interpolated
+// into a raw SMTP header or message body in this file is passed through
+// sanitizeHeaderField or sanitizeName first.
+var crlfPattern = regexp.MustCompile(`[\r\n\x00]`)
+
 // sanitizeHeaderField removes CR, LF, and null characters to prevent SMTP header injection (CWE-640).
 func sanitizeHeaderField(s string) string {
-	s = strings.ReplaceAll(s, "\r", "")
-	s = strings.ReplaceAll(s, "\n", "")
-	s = strings.ReplaceAll(s, "\x00", "")
-	return strings.TrimSpace(s)
+	return strings.TrimSpace(crlfPattern.ReplaceAllString(s, ""))
 }
+
+// unsafeNameCharsPattern is the inverse of sanitizeName's allowlist (letters,
+// digits, spaces, dots, dashes, underscores) — anything not in the allowlist
+// is stripped, so the result can never contain CR/LF or other characters
+// that would let a user-controlled name (an account name, a team name)
+// manipulate the raw SMTP message this package hand-assembles.
+var unsafeNameCharsPattern = regexp.MustCompile(`[^a-zA-Z0-9 ._-]`)
 
 // sanitizeName filters a recipient name to an allowlist of safe characters (letters, digits, spaces, dots, dashes, underscores).
 func sanitizeName(name string) string {
 	clean := sanitizeHeaderField(name)
-	var sb strings.Builder
-	for _, r := range clean {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == ' ' || r == '.' || r == '_' || r == '-' {
-			sb.WriteRune(r)
-		}
-	}
-	return strings.TrimSpace(sb.String())
+	return strings.TrimSpace(unsafeNameCharsPattern.ReplaceAllString(clean, ""))
 }
 
 // EmailSender defines the interface for delivering outbound transactional emails.
