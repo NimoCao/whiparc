@@ -372,9 +372,12 @@ func handleCreateTeamInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// teamName/user.Name are sanitized here, at the call site — see the
+	// identical comment on the SendVerificationEmail call sites in main.go
+	// for why this can't be left to EmailSender's own implementations.
 	acceptLink := fmt.Sprintf("%s/invites/accept?token=%s", oauthFrontendBase(), token)
 	go func() {
-		if err := emailSender.SendInviteEmail(email, teamName, user.Name, acceptLink); err != nil {
+		if err := emailSender.SendInviteEmail(email, sanitizeName(teamName), sanitizeName(user.Name), acceptLink); err != nil {
 			log.Printf("[EMAIL] Failed to send invite email to %s: %v\n", email, err)
 		}
 	}()

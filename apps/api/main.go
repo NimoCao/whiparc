@@ -1482,10 +1482,16 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Dispatch verification email in background (Console / Resend / SMTP)
+	// Dispatch verification email in background (Console / Resend / SMTP).
+	// name is sanitized here, at the call site, rather than trusting each
+	// EmailSender implementation to do it internally — the mailer package's
+	// own sanitization happens behind an interface dispatch that static
+	// analysis (e.g. CodeQL) can't see through, so from its perspective an
+	// unsanitized value passed into SendVerificationEmail is a sink hit
+	// regardless of what SMTPMailer/ResendMailer/ConsoleMailer do with it.
 	verificationLink := fmt.Sprintf("%s/verify-email?token=%s", oauthFrontendBase(), verificationToken)
 	go func() {
-		if err := emailSender.SendVerificationEmail(email, name, verificationLink); err != nil {
+		if err := emailSender.SendVerificationEmail(email, sanitizeName(name), verificationLink); err != nil {
 			log.Printf("[EMAIL] Failed to send verification email to %s: %v\n", email, err)
 		}
 	}()
@@ -1688,7 +1694,7 @@ func handleResendVerification(w http.ResponseWriter, r *http.Request) {
 
 	verificationLink := fmt.Sprintf("%s/verify-email?token=%s", oauthFrontendBase(), newToken)
 	go func() {
-		if err := emailSender.SendVerificationEmail(email, name, verificationLink); err != nil {
+		if err := emailSender.SendVerificationEmail(email, sanitizeName(name), verificationLink); err != nil {
 			log.Printf("[EMAIL] Failed to resend verification email to %s: %v\n", email, err)
 		}
 	}()
