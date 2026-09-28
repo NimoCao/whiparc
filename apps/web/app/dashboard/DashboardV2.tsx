@@ -7,25 +7,22 @@ import { Icon } from '@iconify/react';
 import { useAuthStore } from '../store/useAuthStore';
 import { ProjectSettingsModal } from '../components/ProjectSettingsModal';
 import { PublishTemplateModal } from '../components/PublishTemplateModal';
+import { CommandPalette } from '../components/CommandPalette';
+import { TeamSwitcher } from '../components/TeamSwitcher';
 import EmailVerificationBanner from '../components/EmailVerificationBanner';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
-import { STATIC_RUNS, STATIC_ACTIVITY } from './staticData';
-import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon, LogoMark } from './NavIcons';
-import type { Project } from '../lib/types';
+import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon } from './NavIcons';
+import { BrandLogo } from '../components/brand/BrandLogo';
+import type { ActivityEvent, Project, RunRow, Team } from '../lib/types';
+import { useAggregatedRuns } from '../lib/useAggregatedRuns';
+import { useAnyActiveAgent } from '../lib/useAnyActiveAgent';
+import { useActivity } from '../lib/useActivity';
 import '../components/ui/blueprint.css';
 import './dashboard.css';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-
-interface Team {
-  id: string;
-  name: string;
-  slug: string;
-  owner_id: string;
-  created_at: string;
-}
 
 interface JoinRequest {
   id: string;
@@ -63,10 +60,115 @@ function greeting(hour: number) {
   return 'Evening';
 }
 
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const mins = Math.floor((Date.now() - then) / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? 'yesterday' : `${days}d ago`;
+}
+
+function formatDuration(startIso: string, endIso: string): string {
+  const ms = new Date(endIso).getTime() - new Date(startIso).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return '—';
+  const secs = Math.round(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+}
+
+// Latest ~5 runs, most-failed-projects for the "Needs a look" tile, and a
+// 7-bucket (one per day) sparkline — all derived from the same aggregated
+// run list per product-memory 08.5 items A1/A2, so this stays a single
+// pass over `runs` rather than several independent filters.
+function computeDashboardRunStats(runs: RunRow[]) {
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const sevenDaysAgo = now - 7 * dayMs;
+  const last7d = runs.filter((r) => new Date(r.createdAt).getTime() >= sevenDaysAgo);
+
+  const sparkBuckets = [0, 0, 0, 0, 0, 0, 0];
+  for (const r of last7d) {
+    const ageDays = Math.floor((now - new Date(r.createdAt).getTime()) / dayMs);
+    const bucket = 6 - Math.min(6, Math.max(0, ageDays));
+    sparkBuckets[bucket] += 1;
+  }
+  const maxBucket = Math.max(1, ...sparkBuckets);
+  const sparkline = sparkBuckets.map((count) => Math.max(6, Math.round((count / maxBucket) * 100)));
+
+  // "Deploy" excludes explicit destroy and plan runs (a dry run changes
+  // nothing, so it isn't a deploy either — added alongside A9); legacy rows
+  // with no runType (pre-migration) still count, matching this app's
+  // "honest gap, not an invented value" convention elsewhere — we just
+  // can't rule destroys/plans out for them.
+  const lastDeploy = runs.find((r) => r.status === 'SUCCESS' && r.runType !== 'destroy' && r.runType !== 'plan') ?? null;
+
+  // A project "needs a look" if its own most recent run failed — not a raw
+  // count of failed runs, which would double-count a project that's been
+  // retried several times.
+  const latestByProject = new Map<string, RunRow>();
+  for (const r of runs) {
+    if (!latestByProject.has(r.projectId)) latestByProject.set(r.projectId, r);
+  }
+  const failingProjects = [...latestByProject.values()].filter((r) => r.status === 'FAILED');
+
+  return {
+    recentRuns: runs.slice(0, 5),
+    failedRuns: runs.filter((r) => r.status === 'FAILED').slice(0, 5),
+    count7d: last7d.length,
+    sparkline,
+    lastDeploy,
+    failingProjects,
+  };
+}
+
+// Turns an ActivityEvent into the one-line sentence the mockup's static
+// STATIC_ACTIVITY used to hardcode. Only describes what the payload
+// actually says — no invented detail (e.g. deploy.failed has no captured
+// error message today, so it doesn't claim one) per this app's "honest gap"
+// convention (see obsidian_memory/08.6). Unrecognized/future `kind` values
+// fall back to a generic line built from the kind string itself, so a new
+// event type instrumented server-side without a matching frontend case
+// still renders something reasonable instead of nothing.
+function formatActivityEvent(event: ActivityEvent, currentUserId: string): string {
+  const actor = event.actorId === currentUserId ? 'You' : event.actorName || 'Someone';
+  const project = event.projectName || 'a project';
+  const p = event.payload || {};
+  switch (event.kind) {
+    case 'project.created':
+      return `${actor} created ${project}.`;
+    case 'credential.created':
+      return `${actor} added a ${p.provider ? `${p.provider} ` : ''}credential to ${project}.`;
+    case 'credential.revoked':
+      return `${actor} revoked a ${p.provider ? `${p.provider} ` : ''}credential from ${project}.`;
+    case 'member.added':
+      return `${actor} added ${p.member_name || 'someone'} to ${project}.`;
+    case 'template.published':
+      return `${actor} published ${project} as a template.`;
+    case 'deploy.succeeded':
+      return `${actor} deployed ${project}${p.target ? ` to ${p.target}` : ''}.`;
+    case 'deploy.failed':
+      return `Apply failed on ${project}.`;
+    case 'destroy.succeeded':
+      return `${actor} destroyed ${project}.`;
+    case 'destroy.failed':
+      return `Destroy failed on ${project}.`;
+    case 'plan.succeeded':
+      return `${actor} ran a plan on ${project}${p.target ? ` (${p.target})` : ''}.`;
+    case 'plan.failed':
+      return `Plan failed on ${project}.`;
+    default:
+      return `${actor}: ${event.kind.replace(/[._]/g, ' ')} on ${project}.`;
+  }
+}
+
 function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { token, user, hasHydrated, logout } = useAuthStore();
+  const { token, user, hasHydrated, logout, dismissOnboarding } = useAuthStore();
 
   const [theme, setTheme] = useState<Theme>('dark');
   const [projects, setProjects] = useState<Project[]>([]);
@@ -74,13 +176,26 @@ function DashboardContent() {
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
+  // Which team's projects to show (product-memory 08.5 item A7). Persisted
+  // per-browser, not per-account server-side — switching teams is a view
+  // preference, not data every device needs to agree on. Falls back to the
+  // user's first team whenever the stored id doesn't match any real team
+  // (first visit, or the stored team was since left/deleted).
+  const [currentTeamId, setCurrentTeamId] = useState<string | null>(() =>
+    typeof window === 'undefined' ? null : localStorage.getItem('whiparc-current-team')
+  );
+  const selectTeam = (teamId: string) => {
+    setCurrentTeamId(teamId);
+    localStorage.setItem('whiparc-current-team', teamId);
+  };
+
   const [searchQuery, setSearchQuery] = useState('');
   const [view, setView] = useState<'mine' | 'discover'>('mine');
   const [runFilter, setRunFilter] = useState<'all' | 'failed'>('all');
-  const [firstRunDismissed, setFirstRunDismissed] = useState(false);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [selectedProjectForSettings, setSelectedProjectForSettings] = useState<Project | null>(null);
   const [isPublishOpen, setIsPublishOpen] = useState(false);
@@ -113,6 +228,21 @@ function DashboardContent() {
       router.replace('/dashboard');
     }
   }, [searchParams, router]);
+
+  // Global command palette shortcut (product-memory 08.5 item A8) — Cmd/Ctrl+K
+  // from anywhere on the page, matching the convention this shortcut carries
+  // in most other apps rather than requiring the header search box to be
+  // focused first.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const fetchData = useCallback(async () => {
     const activeToken = token;
@@ -276,23 +406,31 @@ function DashboardContent() {
     [now]
   );
 
+  const { runs: aggregatedRuns, isLoading: isLoadingRuns } = useAggregatedRuns(token);
+  const runStats = useMemo(() => computeDashboardRunStats(aggregatedRuns), [aggregatedRuns]);
+  const { hasActiveAgent } = useAnyActiveAgent(token, projects);
+  const { events: activityEvents, isLoading: isLoadingActivity } = useActivity(token, 10);
+
   if (!user) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#07080B', color: '#94A3B8' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#101114', color: '#A3A6AF' }}>
         <Icon icon="lucide:loader-2" className="animate-spin" width={28} />
       </div>
     );
   }
 
-  const myProjects = projects.filter((p) => p.user_role !== '');
+  const activeTeam = teams.find((t) => t.id === currentTeamId) ?? teams[0];
+  // Team-scoped only for "mine" — "Discover" is cross-team public projects
+  // by design, switching teams shouldn't hide those.
+  const myProjects = projects.filter((p) => p.user_role !== '' && (!activeTeam || p.team_id === activeTeam.id));
   const discoverProjects = projects.filter((p) => p.user_role === '');
   const visibleProjects = (view === 'mine' ? myProjects : discoverProjects).filter(
     (p) => p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const runs = runFilter === 'failed' ? STATIC_RUNS.filter((r) => r.status === 'failed') : STATIC_RUNS;
-  const isFirstRun = !firstRunDismissed && myProjects.length <= 1;
-  const primaryTeam = teams[0];
+  const visibleRuns = runFilter === 'failed' ? runStats.failedRuns : runStats.recentRuns;
+  const isFirstRun = !user.onboarding_dismissed && myProjects.length <= 1;
+  const hasAnyRun = aggregatedRuns.length > 0;
   const initials = user.name
     .split(' ')
     .map((p) => p[0])
@@ -307,10 +445,7 @@ function DashboardContent() {
     >
       <aside style={{ width: 216, flex: 'none', borderRight: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', flexDirection: 'column', position: 'sticky', top: 0, alignSelf: 'flex-start', height: '100vh' }}>
         <div style={{ height: 56, flex: 'none', display: 'flex', alignItems: 'center', gap: 9, padding: '0 16px', borderBottom: '1px solid var(--line)' }}>
-          <span style={{ width: 24, height: 24, border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <LogoMark size={24} />
-          </span>
-          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, letterSpacing: '-.02em' }}>whiparc</span>
+          <BrandLogo size={24} />
         </div>
 
         <nav style={{ padding: '14px 10px', display: 'grid', gap: 2 }}>
@@ -328,7 +463,7 @@ function DashboardContent() {
               gap: 10,
               padding: '8px 10px',
               fontSize: 14.5,
-              color: active ? '#fff' : 'var(--ink2)',
+              color: active ? 'var(--on-accent)' : 'var(--ink2)',
               background: active ? 'var(--accent)' : 'transparent',
             };
             return item.href.startsWith('/') ? (
@@ -344,19 +479,15 @@ function DashboardContent() {
         </nav>
 
         <div style={{ marginTop: 'auto', padding: 12, borderTop: '1px solid var(--line)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: '1px solid var(--accent)', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }}>
-            <span style={{ width: 7, height: 7, flexShrink: 0, background: 'var(--accent-ink)', animation: 'wpBeat 2.2s ease-in-out infinite' }} />
-            <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10.5, color: 'var(--accent-ink)' }}>sandbox online</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 12 }}>
-            <span style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-hover)', color: '#fff', fontFamily: 'var(--font-display)', fontSize: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <span style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-hover)', color: 'var(--on-accent)', fontFamily: 'var(--font-display)', fontSize: 12 }}>
               {initials || 'U'}
             </span>
             <div style={{ minWidth: 0 }}>
               <p style={{ margin: 0, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--ink)' }}>{user.name}</p>
               <p style={{ margin: 0, fontSize: 11, color: 'var(--ink2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {user.plan || 'Member'}
-                {primaryTeam ? ` · ${primaryTeam.name}` : ''}
+                {activeTeam ? ` · ${activeTeam.name}` : ''}
               </p>
             </div>
             <button
@@ -374,9 +505,13 @@ function DashboardContent() {
 
       <main style={{ flex: 1, minWidth: 0 }}>
         <header style={{ height: 56, display: 'flex', alignItems: 'center', gap: 14, padding: '0 clamp(16px,2.5vw,28px)', borderBottom: '1px solid var(--line)', background: 'var(--ground)', position: 'sticky', top: 0, zIndex: 20 }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8, height: 32, padding: '0 10px', fontSize: 14, border: '1px solid var(--line)', color: 'var(--ink)', whiteSpace: 'nowrap' }}>
-            {primaryTeam?.name || 'personal'}
-          </span>
+          <TeamSwitcher
+            teams={teams}
+            currentTeamId={activeTeam?.id ?? null}
+            onSelectTeam={selectTeam}
+            onTeamCreated={(team) => setTeams((prev) => [...prev, team])}
+            token={token || ''}
+          />
           <div style={{ flex: 1, maxWidth: 340, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', height: 32, border: '1px solid var(--line)', background: 'transparent' }}>
             <Icon icon="lucide:search" width={14} style={{ color: 'var(--ink3)', flexShrink: 0 }} />
             <input
@@ -386,6 +521,14 @@ function DashboardContent() {
               className="wp-dash-input"
               style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', fontSize: 13.5, color: 'var(--ink)', fontFamily: 'var(--font-body-marketing), sans-serif' }}
             />
+            <button
+              type="button"
+              onClick={() => setIsPaletteOpen(true)}
+              title="Jump to anything (⌘K)"
+              style={{ flexShrink: 0, fontFamily: 'var(--font-mono-marketing)', fontSize: 10, color: 'var(--ink3)', border: '1px solid var(--line)', padding: '2px 6px', background: 'transparent', cursor: 'pointer' }}
+            >
+              ⌘K
+            </button>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
             <button
@@ -401,7 +544,7 @@ function DashboardContent() {
               type="button"
               onClick={() => setIsCreateModalOpen(true)}
               className="wp-dash-submit"
-              style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', fontSize: 13.5, background: 'var(--accent)', color: '#fff', border: 0, cursor: 'pointer' }}
+              style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', fontSize: 13.5, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}
             >
               New project
             </button>
@@ -426,13 +569,13 @@ function DashboardContent() {
               <BlueprintCorners />
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
                 <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 20, color: 'var(--ink)' }}>Three steps to your first free deploy</h2>
-                <button type="button" onClick={() => setFirstRunDismissed(true)} style={{ height: 28, padding: '0 8px', fontSize: 13, color: 'var(--ink2)', background: 'transparent', border: 0, cursor: 'pointer' }}>
+                <button type="button" onClick={() => dismissOnboarding()} style={{ height: 28, padding: '0 8px', fontSize: 13, color: 'var(--ink2)', background: 'transparent', border: 0, cursor: 'pointer' }}>
                   Dismiss
                 </button>
               </div>
               <div style={{ marginTop: 18, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 18 }}>
                 <div style={{ display: 'flex', gap: 11 }}>
-                  <span style={{ width: 22, height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: myProjects.length > 0 ? 'var(--accent)' : 'transparent', border: myProjects.length > 0 ? undefined : '1px solid var(--accent-ink)', color: myProjects.length > 0 ? '#fff' : 'var(--accent-ink)', fontFamily: 'var(--font-mono-marketing)', fontSize: 11 }}>
+                  <span style={{ width: 22, height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: myProjects.length > 0 ? 'var(--accent)' : 'transparent', border: myProjects.length > 0 ? undefined : '1px solid var(--accent-ink)', color: myProjects.length > 0 ? 'var(--on-accent)' : 'var(--accent-ink)', fontFamily: 'var(--font-mono-marketing)', fontSize: 11 }}>
                     {myProjects.length > 0 ? '✓' : '1'}
                   </span>
                   <div>
@@ -441,17 +584,21 @@ function DashboardContent() {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 11 }}>
-                  <span style={{ width: 22, height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--accent-ink)', color: 'var(--accent-ink)', fontFamily: 'var(--font-mono-marketing)', fontSize: 11 }}>2</span>
+                  <span style={{ width: 22, height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: hasActiveAgent ? 'var(--accent)' : 'transparent', border: hasActiveAgent ? undefined : '1px solid var(--accent-ink)', color: hasActiveAgent ? 'var(--on-accent)' : 'var(--accent-ink)', fontFamily: 'var(--font-mono-marketing)', fontSize: 11 }}>
+                    {hasActiveAgent ? '✓' : '2'}
+                  </span>
                   <div>
                     <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, color: 'var(--ink)' }}>Start the sandbox</p>
-                    <p style={{ margin: '1px 0 0', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink2)' }}>whiparc sandbox up</p>
+                    <p style={{ margin: '1px 0 0', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink2)' }}>{hasActiveAgent ? 'Done — connected.' : 'whiparc sandbox up'}</p>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 11 }}>
-                  <span style={{ width: 22, height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', color: 'var(--ink2)', fontFamily: 'var(--font-mono-marketing)', fontSize: 11 }}>3</span>
+                  <span style={{ width: 22, height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: hasAnyRun ? 'var(--accent)' : 'transparent', border: hasAnyRun ? undefined : '1px solid var(--line)', color: hasAnyRun ? 'var(--on-accent)' : 'var(--ink2)', fontFamily: 'var(--font-mono-marketing)', fontSize: 11 }}>
+                    {hasAnyRun ? '✓' : '3'}
+                  </span>
                   <div>
                     <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, color: 'var(--ink)' }}>Deploy it</p>
-                    <p style={{ margin: '1px 0 0', fontSize: 13.5, color: 'var(--ink2)' }}>Local target. Costs nothing.</p>
+                    <p style={{ margin: '1px 0 0', fontSize: 13.5, color: 'var(--ink2)' }}>{hasAnyRun ? 'Done — see Recent runs below.' : 'Local target. Costs nothing.'}</p>
                   </div>
                 </div>
               </div>
@@ -461,25 +608,39 @@ function DashboardContent() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 14 }}>
             <div style={{ border: '1px solid var(--line)', padding: '14px 16px' }}>
               <p style={labelStyle}>Last deploy</p>
-              <p style={{ margin: '6px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, lineHeight: 1, color: 'var(--ink)' }}>2h ago</p>
-              <p style={{ margin: '5px 0 0', fontSize: 13, color: 'var(--ink2)' }}>platform-infra · success</p>
+              <p style={{ margin: '6px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, lineHeight: 1, color: 'var(--ink)' }}>
+                {isLoadingRuns ? '—' : runStats.lastDeploy ? timeAgo(runStats.lastDeploy.updatedAt) : 'None yet'}
+              </p>
+              <p style={{ margin: '5px 0 0', fontSize: 13, color: 'var(--ink2)' }}>
+                {runStats.lastDeploy ? `${runStats.lastDeploy.projectName} · ${runStats.lastDeploy.status.toLowerCase()}` : isLoadingRuns ? 'Loading…' : 'Deploy a project to see it here.'}
+              </p>
             </div>
             <div style={{ border: '1px solid var(--line)', padding: '14px 16px' }}>
               <p style={labelStyle}>Runs, last 7 days</p>
-              <p style={{ margin: '6px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, lineHeight: 1, color: 'var(--ink)' }}>23</p>
+              <p style={{ margin: '6px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, lineHeight: 1, color: 'var(--ink)' }}>{isLoadingRuns ? '—' : runStats.count7d}</p>
               <div style={{ marginTop: 8, display: 'flex', alignItems: 'flex-end', gap: 3, height: 22 }}>
-                {[70, 100, 45, 85, 60, 95, 75].map((h, i) => (
-                  <span key={i} style={{ flex: 1, height: `${h}%`, background: i === 2 ? 'var(--line)' : i === 6 ? 'var(--accent)' : 'color-mix(in srgb, var(--accent) 45%, transparent)' }} />
+                {runStats.sparkline.map((h, i) => (
+                  <span key={i} style={{ flex: 1, height: `${h}%`, background: i === 6 ? 'var(--accent)' : 'color-mix(in srgb, var(--accent) 45%, transparent)' }} />
                 ))}
               </div>
             </div>
             <div style={{ border: '1px solid var(--line)', padding: '14px 16px' }}>
               <p style={labelStyle}>Needs a look</p>
-              <p style={{ margin: '6px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, lineHeight: 1, color: 'var(--danger)' }}>2 failed</p>
+              <p style={{ margin: '6px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, lineHeight: 1, color: runStats.failingProjects.length > 0 ? 'var(--danger)' : 'var(--ink)' }}>
+                {isLoadingRuns ? '—' : runStats.failingProjects.length > 0 ? `${runStats.failingProjects.length} failed` : 'All clear'}
+              </p>
               <p style={{ margin: '5px 0 0', fontSize: 13 }}>
-                <a href="#" className="wp-dash-link" style={{ color: 'var(--accent-ink)' }}>
-                  edge-cache, both on apply
-                </a>
+                {runStats.failingProjects.length > 0 ? (
+                  <Link href="/runs" className="wp-dash-link" style={{ color: 'var(--accent-ink)' }}>
+                    {runStats.failingProjects
+                      .slice(0, 2)
+                      .map((r) => r.projectName)
+                      .join(', ')}
+                    {runStats.failingProjects.length > 2 ? ` +${runStats.failingProjects.length - 2} more` : ''}
+                  </Link>
+                ) : (
+                  <span style={{ color: 'var(--ink2)' }}>{isLoadingRuns ? 'Loading…' : 'No projects need attention.'}</span>
+                )}
               </p>
             </div>
             <div style={{ border: '1px solid var(--line)', padding: '14px 16px' }}>
@@ -575,7 +736,7 @@ function DashboardContent() {
                                 type="button"
                                 onClick={() => handleOpenWorkspace(project.id)}
                                 className="wp-dash-submit"
-                                style={{ height: 26, padding: '0 10px', fontSize: 12.5, background: 'var(--accent)', color: '#fff', border: 0, cursor: 'pointer' }}
+                                style={{ height: 26, padding: '0 10px', fontSize: 12.5, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}
                               >
                                 Open
                               </button>
@@ -588,7 +749,7 @@ function DashboardContent() {
                                 setIsJoinModalOpen(true);
                               }}
                               className="wp-dash-submit"
-                              style={{ height: 26, padding: '0 10px', fontSize: 12.5, background: 'var(--accent)', color: '#fff', border: 0, cursor: 'pointer' }}
+                              style={{ height: 26, padding: '0 10px', fontSize: 12.5, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}
                             >
                               Request access
                             </button>
@@ -621,14 +782,14 @@ function DashboardContent() {
                     <button
                       type="button"
                       onClick={() => setRunFilter('all')}
-                      style={{ padding: '5px 12px', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13.5, cursor: 'pointer', border: 0, background: runFilter === 'all' ? 'var(--accent)' : 'transparent', color: runFilter === 'all' ? '#fff' : 'var(--ink2)' }}
+                      style={{ padding: '5px 12px', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13.5, cursor: 'pointer', border: 0, background: runFilter === 'all' ? 'var(--accent)' : 'transparent', color: runFilter === 'all' ? 'var(--on-accent)' : 'var(--ink2)' }}
                     >
                       All
                     </button>
                     <button
                       type="button"
                       onClick={() => setRunFilter('failed')}
-                      style={{ padding: '5px 12px', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13.5, cursor: 'pointer', border: 0, borderLeft: '1px solid var(--line)', background: runFilter === 'failed' ? 'var(--accent)' : 'transparent', color: runFilter === 'failed' ? '#fff' : 'var(--ink2)' }}
+                      style={{ padding: '5px 12px', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13.5, cursor: 'pointer', border: 0, borderLeft: '1px solid var(--line)', background: runFilter === 'failed' ? 'var(--accent)' : 'transparent', color: runFilter === 'failed' ? 'var(--on-accent)' : 'var(--ink2)' }}
                     >
                       Failed only
                     </button>
@@ -646,48 +807,47 @@ function DashboardContent() {
                       </tr>
                     </thead>
                     <tbody>
-                      {runs.map((run) => (
-                        <tr key={run.id} className="wp-dash-navlink">
-                          <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink)' }}>{run.id}</td>
-                          <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', color: 'var(--ink)' }}>{run.project}</td>
-                          <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink2)' }}>{run.target}</td>
-                          <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink2)' }}>{run.dur}</td>
-                          <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', color: 'var(--ink2)' }}>{run.when}</td>
-                          <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)' }}>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink)' }}>
-                              <span style={{ width: 6, height: 6, background: run.status === 'failed' ? 'var(--danger)' : 'var(--accent-ink)' }} />
-                              {run.status}
-                            </span>
+                      {isLoadingRuns ? (
+                        <tr>
+                          <td colSpan={6} style={{ padding: '18px 12px', color: 'var(--ink2)', fontSize: 13.5 }}>
+                            Loading runs…
                           </td>
                         </tr>
-                      ))}
+                      ) : visibleRuns.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} style={{ padding: '18px 12px', color: 'var(--ink2)', fontSize: 13.5 }}>
+                            {runFilter === 'failed' ? 'No failed runs.' : 'No runs yet — deploy a project to see it here.'}
+                          </td>
+                        </tr>
+                      ) : (
+                        visibleRuns.map((run) => (
+                          <tr key={run.id} className="wp-dash-navlink" onClick={() => handleOpenWorkspace(run.projectId)} style={{ cursor: 'pointer' }}>
+                            <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink)' }}>{run.id.slice(0, 8)}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', color: 'var(--ink)' }}>{run.projectName}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink2)' }}>{run.target ?? '—'}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink2)' }}>{formatDuration(run.createdAt, run.updatedAt)}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', color: 'var(--ink2)' }}>{timeAgo(run.createdAt)}</td>
+                            <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink)' }}>
+                                <span style={{ width: 6, height: 6, background: run.status === 'FAILED' ? 'var(--danger)' : 'var(--accent-ink)' }} />
+                                {run.status.toLowerCase()}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
+                <p style={{ margin: '8px 0 0', fontSize: 12.5 }}>
+                  <Link href="/runs" className="wp-dash-link" style={{ color: 'var(--accent-ink)' }}>
+                    View all runs →
+                  </Link>
+                </p>
               </section>
             </div>
 
             <div style={{ display: 'grid', gap: 'clamp(18px,2vw,24px)', minWidth: 0 }}>
-              <section className="wp-blueprint" style={{ position: 'relative', background: 'var(--panel)', padding: 16 }}>
-                <BlueprintCorners />
-                <p style={labelStyle}>Local sandbox agent</p>
-                <p style={{ margin: '10px 0 0', display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 19, color: 'var(--ink)' }}>
-                  <span style={{ width: 8, height: 8, background: 'var(--accent-ink)', animation: 'wpBeat 2.2s ease-in-out infinite' }} />
-                  Connected
-                </p>
-                <p style={{ margin: '6px 0 0', fontFamily: 'var(--font-mono-marketing)', fontSize: 11.5, color: 'var(--ink2)', lineHeight: 1.6 }}>
-                  heartbeat 22s ago · cli 1.0.0
-                  <br />
-                  localstack + 3 ssh targets up
-                </p>
-                <p style={{ margin: '12px 0 0', fontSize: 13.5, color: 'var(--ink2)' }}>
-                  Deploys aimed at <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink)' }}>local_agent</span> will run here.
-                </p>
-                <a href="#" className="wp-dash-ghost" style={{ marginTop: 12, width: '100%', height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13.5, border: '1px solid var(--line)', color: 'var(--ink)' }}>
-                  Open sandbox logs
-                </a>
-              </section>
-
               {joinRequests.length > 0 && (
                 <section style={{ border: '1px solid var(--accent)', background: 'color-mix(in srgb, var(--accent) 9%, transparent)', padding: 16 }}>
                   <p style={{ margin: 0, fontFamily: 'var(--font-mono-marketing)', fontSize: 9.5, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--accent-ink)' }}>Waiting on you</p>
@@ -701,7 +861,7 @@ function DashboardContent() {
                       type="button"
                       onClick={() => handleReviewRequest(joinRequests[0].project_id, joinRequests[0].id, true)}
                       className="wp-dash-submit"
-                      style={{ height: 32, padding: '0 14px', fontSize: 13.5, background: 'var(--accent)', color: '#fff', border: 0, cursor: 'pointer' }}
+                      style={{ height: 32, padding: '0 14px', fontSize: 13.5, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}
                     >
                       Approve
                     </button>
@@ -720,12 +880,18 @@ function DashboardContent() {
               <section style={{ borderTop: '1px solid var(--line)', paddingTop: 14 }}>
                 <p style={labelStyle}>Activity</p>
                 <div style={{ marginTop: 10, display: 'grid', gap: 10, fontSize: 13.5, color: 'var(--ink)' }}>
-                  {STATIC_ACTIVITY.map((a, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 9 }}>
-                      <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 11, color: 'var(--ink3)', width: 34, flexShrink: 0 }}>{a.when}</span>
-                      <p style={{ margin: 0 }}>{a.text}</p>
-                    </div>
-                  ))}
+                  {isLoadingActivity ? (
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--ink2)' }}>Loading…</p>
+                  ) : activityEvents.length === 0 ? (
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--ink2)' }}>No activity yet.</p>
+                  ) : (
+                    activityEvents.map((event) => (
+                      <div key={event.id} style={{ display: 'flex', gap: 9 }}>
+                        <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 11, color: 'var(--ink3)', width: 34, flexShrink: 0 }}>{timeAgo(event.createdAt).replace(' ago', '')}</span>
+                        <p style={{ margin: 0 }}>{formatActivityEvent(event, user.id)}</p>
+                      </div>
+                    ))
+                  )}
                 </div>
               </section>
             </div>
@@ -808,7 +974,7 @@ function DashboardContent() {
                 type="submit"
                 disabled={isCreating}
                 className="wp-blueprint wp-dash-submit"
-                style={{ position: 'relative', height: 42, background: 'var(--accent)', color: '#fff', border: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, cursor: isCreating ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: isCreating ? 0.7 : 1 }}
+                style={{ position: 'relative', height: 42, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, cursor: isCreating ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: isCreating ? 0.7 : 1 }}
               >
                 <BlueprintCorners />
                 {isCreating ? <Icon icon="lucide:loader-2" className="animate-spin" width={16} /> : 'Create project'}
@@ -871,7 +1037,7 @@ function DashboardContent() {
                 type="submit"
                 disabled={!!joinSuccess}
                 className="wp-dash-submit"
-                style={{ height: 42, background: 'var(--accent)', color: '#fff', border: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, cursor: joinSuccess ? 'default' : 'pointer', opacity: joinSuccess ? 0.6 : 1 }}
+                style={{ height: 42, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, cursor: joinSuccess ? 'default' : 'pointer', opacity: joinSuccess ? 0.6 : 1 }}
               >
                 Submit request
               </button>
@@ -907,6 +1073,8 @@ function DashboardContent() {
           project={selectedProjectForPublish}
         />
       )}
+
+      {isPaletteOpen && <CommandPalette onClose={() => setIsPaletteOpen(false)} projects={projects} navItems={NAV_ITEMS} />}
     </div>
   );
 }

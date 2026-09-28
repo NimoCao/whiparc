@@ -105,7 +105,7 @@ export default function ProfileMenu({ variant = 'default', blueprint = false }: 
               textTransform: 'uppercase',
               fontFamily: 'var(--font-display, inherit)',
               background: 'var(--accent)',
-              color: '#fff',
+              color: 'var(--on-accent)',
             }}
           >
             {user.name.slice(0, 2)}

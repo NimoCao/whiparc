@@ -8,6 +8,7 @@ import ProfileMenu from '../components/ProfileMenu';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
+import { BrandLogo } from '../components/brand/BrandLogo';
 import '../components/ui/blueprint.css';
 import './docs.css';
 
@@ -48,8 +49,8 @@ function CodeBlock({ code }: { code: string }) {
       <pre
         style={{
           margin: 0,
-          background: '#0D0F16',
-          border: '1px solid #1E2233',
+          background: '#17181C',
+          border: '1px solid #2A2C33',
           padding: '14px 44px 14px 16px',
           fontFamily: 'var(--font-mono-marketing), monospace',
           fontSize: 12.5,
@@ -77,9 +78,9 @@ function CodeBlock({ code }: { code: string }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          border: `1px solid ${status === 'copied' ? 'rgba(16,185,129,.4)' : status === 'error' ? 'rgba(244,63,94,.4)' : '#1E2233'}`,
+          border: `1px solid ${status === 'copied' ? 'rgba(16,185,129,.4)' : status === 'error' ? 'rgba(244,63,94,.4)' : '#2A2C33'}`,
           background: status === 'copied' ? 'rgba(16,185,129,.1)' : status === 'error' ? 'rgba(244,63,94,.1)' : 'transparent',
-          color: status === 'copied' ? '#10B981' : status === 'error' ? '#F43F5E' : '#94A3B8',
+          color: status === 'copied' ? '#10B981' : status === 'error' ? '#F43F5E' : '#A3A6AF',
           cursor: 'pointer',
         }}
       >
@@ -290,17 +291,7 @@ export function DocsPageV2() {
       {/* HEADER */}
       <header style={{ height: 56, display: 'flex', alignItems: 'center', gap: 16, padding: '0 clamp(16px,3vw,28px)', borderBottom: '1px solid var(--line)', position: 'sticky', top: 0, background: 'var(--ground)', zIndex: 20 }}>
         <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 9, flex: 'none' }}>
-          <span style={{ width: 24, height: 24, border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} style={{ color: 'var(--ink)' }}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM9 14H5a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1v-4a1 1 0 00-1-1z"
-              />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14 15h5M14 19h5" />
-            </svg>
-          </span>
-          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, letterSpacing: '-.02em', color: 'var(--ink)' }}>whiparc</span>
+          <BrandLogo size={24} style={{ color: 'var(--ink)' }} />
           <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, color: 'var(--ink3)', borderLeft: '1px solid var(--line)', paddingLeft: 10, marginLeft: 2 }}>docs</span>
         </Link>
 
@@ -339,7 +330,7 @@ export function DocsPageV2() {
               <Link
                 href="/dashboard"
                 className="wp-docs-submit"
-                style={{ height: 30, padding: '0 13px', display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 500, background: 'var(--accent)', color: '#fff', border: 0 }}
+                style={{ height: 30, padding: '0 13px', display: 'flex', alignItems: 'center', fontSize: 13, fontWeight: 500, background: 'var(--accent)', color: 'var(--on-accent)', border: 0 }}
               >
                 Dashboard
               </Link>
@@ -380,7 +371,7 @@ export function DocsPageV2() {
                       cursor: 'pointer',
                       fontFamily: 'inherit',
                       fontSize: 13.5,
-                      color: active ? '#fff' : 'var(--ink2)',
+                      color: active ? 'var(--on-accent)' : 'var(--ink2)',
                       background: active ? 'var(--accent)' : 'transparent',
                     }}
                   >
@@ -428,7 +419,7 @@ export function DocsPageV2() {
               </div>
 
               <div style={{ marginTop: 24 }}>
-                <button type="button" onClick={() => setActiveSection('install')} className="wp-docs-submit" style={{ height: 38, padding: '0 20px', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontFamily: 'var(--font-display)', fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 0, cursor: 'pointer' }}>
+                <button type="button" onClick={() => setActiveSection('install')} className="wp-docs-submit" style={{ height: 38, padding: '0 20px', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontFamily: 'var(--font-display)', fontWeight: 600, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}>
                   Proceed to Installation
                   <Icon icon="lucide:arrow-right" width={14} />
                 </button>
@@ -536,7 +527,7 @@ export function DocsPageV2() {
                   <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '1px dashed var(--line)', background: 'var(--ground)', padding: 24, textAlign: 'center' }}>
                     <Icon icon="lucide:lock" width={26} style={{ color: 'var(--ink3)', marginBottom: 8 }} />
                     <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--ink2)' }}>You must be logged in to download compiled binaries.</p>
-                    <Link href="/login" className="wp-docs-submit" style={{ height: 32, padding: '0 16px', display: 'inline-flex', alignItems: 'center', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: '#fff' }}>
+                    <Link href="/login" className="wp-docs-submit" style={{ height: 32, padding: '0 16px', display: 'inline-flex', alignItems: 'center', fontSize: 12, fontWeight: 600, background: 'var(--accent)', color: 'var(--on-accent)' }}>
                       Sign In to Download
                     </Link>
                   </div>
@@ -636,7 +627,7 @@ export function DocsPageV2() {
               </div>
 
               <div style={{ marginTop: 24 }}>
-                <button type="button" onClick={() => setActiveSection('sandbox-intro')} className="wp-docs-submit" style={{ height: 38, padding: '0 20px', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontFamily: 'var(--font-display)', fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 0, cursor: 'pointer' }}>
+                <button type="button" onClick={() => setActiveSection('sandbox-intro')} className="wp-docs-submit" style={{ height: 38, padding: '0 20px', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontFamily: 'var(--font-display)', fontWeight: 600, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}>
                   Next: Set Up Your Local Sandbox
                   <Icon icon="lucide:arrow-right" width={14} />
                 </button>
@@ -684,7 +675,7 @@ export function DocsPageV2() {
               </div>
 
               <div style={{ marginTop: 24 }}>
-                <button type="button" onClick={() => setActiveSection('sandbox-setup')} className="wp-docs-submit" style={{ height: 38, padding: '0 20px', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontFamily: 'var(--font-display)', fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 0, cursor: 'pointer' }}>
+                <button type="button" onClick={() => setActiveSection('sandbox-setup')} className="wp-docs-submit" style={{ height: 38, padding: '0 20px', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontFamily: 'var(--font-display)', fontWeight: 600, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}>
                   Continue to Setup & Pairing
                   <Icon icon="lucide:arrow-right" width={14} />
                 </button>
@@ -758,7 +749,7 @@ whiparc config set gateway-url https://gateway.<your-domain>`} />
               </div>
 
               <div style={{ marginTop: 24 }}>
-                <button type="button" onClick={() => setActiveSection('sandbox-commands')} className="wp-docs-submit" style={{ height: 38, padding: '0 20px', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontFamily: 'var(--font-display)', fontWeight: 600, background: 'var(--accent)', color: '#fff', border: 0, cursor: 'pointer' }}>
+                <button type="button" onClick={() => setActiveSection('sandbox-commands')} className="wp-docs-submit" style={{ height: 38, padding: '0 20px', display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontFamily: 'var(--font-display)', fontWeight: 600, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}>
                   See the Full Command Reference
                   <Icon icon="lucide:arrow-right" width={14} />
                 </button>

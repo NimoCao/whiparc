@@ -65,6 +65,78 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     3,
+		description: "add_run_metadata_columns",
+		up: func(tx sqlExecer) error {
+			// Deliberately nullable, no default, no backfill: rows created
+			// before this migration ran a mix of deploy and destroy with no
+			// reliable way to recover which after the fact. Legacy rows stay
+			// NULL and render "—" client-side, exactly as they do today —
+			// only new rows going forward get a real value (see
+			// obsidian_memory/08.6 section 2.1/2.2).
+			if _, err := tx.Exec("ALTER TABLE pipeline_runs ADD COLUMN run_type TEXT"); err != nil {
+				return fmt.Errorf("failed to add run_type: %w", err)
+			}
+			if _, err := tx.Exec("ALTER TABLE pipeline_runs ADD COLUMN target TEXT"); err != nil {
+				return fmt.Errorf("failed to add target: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		version:     4,
+		description: "add_onboarding_dismissed_to_users",
+		up: func(tx sqlExecer) error {
+			// Nullable, no default: NULL means "never dismissed" (the
+			// dashboard's onboarding checklist still shows), non-NULL is the
+			// dismissal timestamp. Same DATETIME/pgSchema dance as migration
+			// 2's verification_expires_at — see its comment for why.
+			ddl := "ALTER TABLE users ADD COLUMN onboarding_dismissed_at DATETIME"
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to add onboarding_dismissed_at: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		version:     5,
+		description: "add_activity_events_table",
+		up: func(tx sqlExecer) error {
+			// No FK constraints, deliberately: this is an append-only audit
+			// log, not a referential-integrity-checked table — a deleted
+			// project or user shouldn't either block the deletion (as a
+			// RESTRICT FK would) or silently erase its own history (as a
+			// CASCADE FK would). team_id is a convenience denormalization
+			// (see insertActivityEvent) so team-scoped reads don't need a
+			// JOIN through projects; it's looked up once at insert time and
+			// never updated afterward, so a project moved to a different
+			// team later keeps its old events' original team_id — that's the
+			// honest historical record, not a bug.
+			ddl := `CREATE TABLE activity_events (
+				id TEXT PRIMARY KEY,
+				team_id TEXT,
+				project_id TEXT,
+				actor_id TEXT,
+				kind TEXT NOT NULL,
+				payload_json TEXT NOT NULL DEFAULT '{}',
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to create activity_events: %w", err)
+			}
+			if _, err := tx.Exec("CREATE INDEX idx_activity_events_team_id ON activity_events(team_id, created_at)"); err != nil {
+				return fmt.Errorf("failed to create activity_events team index: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

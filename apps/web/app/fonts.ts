@@ -1,4 +1,4 @@
-import { Geist, Space_Grotesk, Barlow, JetBrains_Mono, Kalam } from 'next/font/google';
+import { Geist, Space_Grotesk, Barlow, Barlow_Condensed, JetBrains_Mono } from 'next/font/google';
 
 // Display font for the landing page hero headline only — the rest of the
 // app keeps the Inter/JetBrains Mono stack defined in globals.css.
@@ -34,13 +34,13 @@ export const jetBrainsMonoFont = JetBrains_Mono({
   display: 'swap',
 });
 
-// Workspace canvas nodes only — the "hand-drawn sticky note" card style
-// (see product-memory: node style B, chosen over the plain/unrotated
-// option) uses Kalam for its title/kicker text so the tilted card reads as
-// actually hand-lettered rather than a rotated system font.
-export const kalamFont = Kalam({
+// Whiparc wordmark only (see components/brand/BrandLogo.tsx) — the supplied
+// logo artwork sets "whiparc" in Barlow Condensed Bold, so the live-text
+// lockup loads that exact face rather than approximating it with the
+// marketing display font.
+export const barlowCondensedFont = Barlow_Condensed({
   subsets: ['latin'],
-  weight: ['400', '700'],
-  variable: '--font-handwriting',
+  weight: ['700'],
+  variable: '--font-brand',
   display: 'swap',
 });

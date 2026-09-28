@@ -8,7 +8,8 @@ import ProfileMenu from '../components/ProfileMenu';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
-import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon, LogoMark } from '../dashboard/NavIcons';
+import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon } from '../dashboard/NavIcons';
+import { BrandLogo } from '../components/brand/BrandLogo';
 import type { Project } from '../lib/types';
 import '../components/ui/blueprint.css';
 import './projects.css';
@@ -153,17 +154,14 @@ export default function ProjectsPageV2() {
       <aside style={{ width: 216, flex: 'none', borderRight: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', flexDirection: 'column', position: 'sticky', top: 0, alignSelf: 'flex-start', height: '100vh' }}>
         <div style={{ height: 56, flex: 'none', display: 'flex', alignItems: 'center', gap: 9, padding: '0 16px', borderBottom: '1px solid var(--line)' }}>
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <span style={{ width: 24, height: 24, border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <LogoMark size={24} />
-            </span>
-            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, letterSpacing: '-.02em' }}>whiparc</span>
+            <BrandLogo size={24} />
           </Link>
         </div>
 
         <nav style={{ padding: '14px 10px', display: 'grid', gap: 2 }}>
           {NAV_ITEMS.map((item) => {
             const active = item.key === 'projects';
-            const style: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', fontSize: 14.5, color: active ? '#fff' : 'var(--ink2)', background: active ? 'var(--accent)' : 'transparent' };
+            const style: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', fontSize: 14.5, color: active ? 'var(--on-accent)' : 'var(--ink2)', background: active ? 'var(--accent)' : 'transparent' };
             return (
               <Link key={item.key} href={item.href} className={active ? undefined : 'wp-projects-navlink'} style={style}>
                 {item.icon}
@@ -176,7 +174,7 @@ export default function ProjectsPageV2() {
         <div style={{ marginTop: 'auto', padding: 12, borderTop: '1px solid var(--line)' }}>
           {isLoggedIn ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-              <span style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-hover)', color: '#fff', fontFamily: 'var(--font-display)', fontSize: 12 }}>
+              <span style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-hover)', color: 'var(--on-accent)', fontFamily: 'var(--font-display)', fontSize: 12 }}>
                 {user.name.slice(0, 2).toUpperCase()}
               </span>
               <div style={{ minWidth: 0 }}>
@@ -228,7 +226,7 @@ export default function ProjectsPageV2() {
             <Link
               href={isLoggedIn ? '/dashboard?create=1' : '/login'}
               className="wp-blueprint wp-projects-submit"
-              style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, background: 'var(--accent)', color: '#fff' }}
+              style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, background: 'var(--accent)', color: 'var(--on-accent)' }}
             >
               <Icon icon="lucide:plus" width={13} />
               New project
@@ -265,7 +263,7 @@ export default function ProjectsPageV2() {
                     cursor: 'pointer',
                     border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`,
                     background: active ? 'var(--accent)' : 'transparent',
-                    color: active ? '#fff' : 'var(--ink2)',
+                    color: active ? 'var(--on-accent)' : 'var(--ink2)',
                   }}
                 >
                   {f.label}

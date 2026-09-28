@@ -8,6 +8,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
+import { BrandLogo } from '../components/brand/BrandLogo';
 import '../components/ui/blueprint.css';
 import './login.css';
 
@@ -197,17 +198,7 @@ export function LoginPageV2() {
 
       <header style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px clamp(20px,4vw,40px)' }}>
         <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <span style={{ width: 26, height: 26, border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM9 14H5a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1v-4a1 1 0 00-1-1z"
-              />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M14 15h5M14 19h5" />
-            </svg>
-          </span>
-          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, letterSpacing: '-.02em', color: 'var(--ink)' }}>whiparc</span>
+          <BrandLogo size={26} style={{ color: 'var(--ink)' }} />
         </Link>
         <button
           type="button"
@@ -303,7 +294,7 @@ export function LoginPageV2() {
                 marginTop: 6,
                 height: 44,
                 background: 'var(--accent)',
-                color: '#fff',
+                color: 'var(--on-accent)',
                 border: 0,
                 fontFamily: 'var(--font-display)',
                 fontWeight: 600,

@@ -195,7 +195,7 @@ export function LibraryPanelV2({
                 fontFamily: 'var(--font-mono-marketing, monospace)',
                 cursor: 'pointer',
                 background: techFilter === tech ? 'var(--accent)' : 'transparent',
-                color: techFilter === tech ? '#fff' : 'var(--ink2)',
+                color: techFilter === tech ? 'var(--on-accent)' : 'var(--ink2)',
               }}
             >
               {tech === 'All' ? 'All' : tech === 'Terraform' ? 'TF' : tech === 'Ansible' ? 'Ans' : tech === 'Kubernetes' ? 'K8s' : tech === 'Target' ? 'Tgt' : tech}

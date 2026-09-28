@@ -129,7 +129,7 @@ export function PublishTemplateModal({ isOpen, onClose, project }: PublishTempla
                 </button>
                 <Link
                   href={`/templates/${publishedId}`}
-                  className="px-4 py-2 text-sm bg-primary text-white hover:opacity-95 rounded-lg transition-all cursor-pointer font-semibold flex items-center gap-1.5"
+                  className="px-4 py-2 text-sm bg-primary text-primary-foreground hover:opacity-95 rounded-lg transition-all cursor-pointer font-semibold flex items-center gap-1.5"
                 >
                   View Template
                   <Icon icon="lucide:arrow-right" className="text-sm" />
@@ -138,7 +138,7 @@ export function PublishTemplateModal({ isOpen, onClose, project }: PublishTempla
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 rounded-lg text-xs leading-relaxed flex items-start gap-2">
+              <div className="p-3 bg-primary/10 border border-primary/20 text-primary rounded-lg text-xs leading-relaxed flex items-start gap-2">
                 <Icon icon="lucide:info" className="text-base shrink-0 mt-0.5" />
                 <span>
                   This publishes a snapshot of this project&apos;s current canvas to the public Template Catalog. Editing
@@ -255,7 +255,7 @@ export function PublishTemplateModal({ isOpen, onClose, project }: PublishTempla
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-4 py-2 text-sm bg-primary text-white hover:opacity-95 rounded-lg transition-all cursor-pointer font-semibold flex items-center gap-1.5 disabled:opacity-55"
+                  className="px-4 py-2 text-sm bg-primary text-primary-foreground hover:opacity-95 rounded-lg transition-all cursor-pointer font-semibold flex items-center gap-1.5 disabled:opacity-55"
                 >
                   {isSubmitting && <Icon icon="lucide:loader-2" className="animate-spin text-sm" />}
                   Publish Template

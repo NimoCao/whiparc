@@ -61,7 +61,7 @@ function VerifyEmailContent() {
       <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-xl p-8 shadow-2xl text-center">
         {status === 'verifying' && (
           <div className="py-8 space-y-4">
-            <Icon icon="lucide:loader-2" className="w-12 h-12 text-indigo-500 animate-spin mx-auto" />
+            <Icon icon="lucide:loader-2" className="w-12 h-12 text-primary animate-spin mx-auto" />
             <h2 className="text-xl font-semibold">Verifying your email...</h2>
             <p className="text-sm text-slate-400">Please wait while we confirm your email token.</p>
           </div>
@@ -79,7 +79,7 @@ function VerifyEmailContent() {
             <div className="pt-4">
               <button
                 onClick={() => router.push('/dashboard')}
-                className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20"
+                className="w-full py-2.5 px-4 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-lg transition-colors flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
               >
                 Continue to Dashboard
                 <Icon icon="lucide:arrow-right" className="w-4 h-4" />
@@ -109,7 +109,7 @@ function VerifyEmailContent() {
                 <button
                   onClick={handleResend}
                   disabled={isResending}
-                  className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="w-full py-2.5 px-4 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {isResending ? (
                     <>
@@ -123,7 +123,7 @@ function VerifyEmailContent() {
               ) : (
                 <Link
                   href="/login"
-                  className="block w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg transition-colors"
+                  className="block w-full py-2.5 px-4 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-lg transition-colors"
                 >
                   Sign In to Resend Link
                 </Link>
@@ -141,7 +141,7 @@ function VerifyEmailContent() {
 
         {status === 'idle' && (
           <div className="py-6 space-y-4">
-            <div className="w-16 h-16 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 rounded-full flex items-center justify-center mx-auto">
+            <div className="w-16 h-16 bg-primary/10 border border-primary/30 text-primary rounded-full flex items-center justify-center mx-auto">
               <Icon icon="lucide:mail" className="w-10 h-10" />
             </div>
             <h2 className="text-2xl font-bold text-white">Verify Your Email</h2>
@@ -151,7 +151,7 @@ function VerifyEmailContent() {
             <div className="pt-4">
               <Link
                 href="/dashboard"
-                className="inline-block py-2.5 px-6 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg transition-colors"
+                className="inline-block py-2.5 px-6 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-lg transition-colors"
               >
                 Go to Dashboard
               </Link>
@@ -168,7 +168,7 @@ export default function VerifyEmailPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-          <Icon icon="lucide:loader-2" className="w-8 h-8 animate-spin text-indigo-500" />
+          <Icon icon="lucide:loader-2" className="w-8 h-8 animate-spin text-primary" />
         </div>
       }
     >

@@ -1,0 +1,131 @@
+/* Blueprint canvas nodes + connectors (workspace editor and template
+   previews). Colors come from the theme variables on the surrounding page
+   root, so both dark and light repaint without JS. */
+
+@keyframes wpNodeBeat {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* Connection handles: 7px registration squares. Faint at rest so a node reads
+   as the design's clean frame and connectors end crisply at its edge; full
+   strength while the node is hovered/active, or the handle itself is. */
+.wp-node .wp-handle.react-flow__handle {
+  width: 7px;
+  height: 7px;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid currentColor;
+  border-radius: 0;
+  background: var(--panel);
+  opacity: 0.45;
+  cursor: crosshair;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.wp-node:hover .wp-handle.react-flow__handle,
+.wp-node[data-active='true'] .wp-handle.react-flow__handle,
+.wp-node .wp-handle.react-flow__handle:hover {
+  opacity: 1;
+}
+
+.wp-node .wp-handle.react-flow__handle:hover {
+  background: currentColor;
+}
+
+/* Square hover actions that sit on the frame's border like the status tag. */
+.wp-node-action {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink2);
+  cursor: pointer;
+  opacity: 0;
+  z-index: 40;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.wp-node:hover .wp-node-action {
+  opacity: 1;
+}
+
+.wp-node-action:hover {
+  color: var(--ink);
+  border-color: var(--ink2);
+}
+
+.wp-node-action.danger:hover {
+  color: var(--danger, #f43f5e);
+  border-color: var(--danger, #f43f5e);
+}
+
+.wp-node-action.warn {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.wp-node-action.warn:hover {
+  background: var(--amber);
+  color: var(--panel);
+}
+
+/* Connectors: straight orthogonal runs with square corners. */
+.wp-edge-line {
+  fill: none;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+}
+
+/* Soft wide underlay that appears on hover and while the connector is
+   selected (an inline stroke-width would beat a stylesheet hover rule, so the
+   emphasis is a separate path rather than a thicker line). */
+.wp-edge-halo {
+  fill: none;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+  stroke-dasharray: none;
+  animation: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.react-flow__edge:hover .wp-edge-halo,
+.wp-edge-halo[data-selected='true'] {
+  opacity: 0.22;
+}
+
+/* React Flow dashes every <path> under an animated edge, which would also
+   dash the arrowhead marker nested inside it. Keep the chevron solid. */
+.react-flow__edge.animated marker path {
+  stroke-dasharray: none;
+  animation: none;
+}
+
+/* Edge labels: hairline plate, square corners, theme colors. */
+.react-flow__edge-textbg {
+  fill: var(--panel);
+  stroke: var(--line);
+  stroke-width: 1px;
+  rx: 0;
+  ry: 0;
+}
+
+.react-flow__edge-text {
+  fill: var(--ink);
+  font-family: var(--font-mono-marketing, ui-monospace, monospace);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}

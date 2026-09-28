@@ -288,6 +288,8 @@ func handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	insertActivityEvent(projectID, user.ID, "project.created", map[string]interface{}{"name": name})
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"id":   projectID,
@@ -496,6 +498,10 @@ func handleApproveJoinRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var memberName string
+	_ = db.QueryRow("SELECT name FROM users WHERE id = ?", reqUserID).Scan(&memberName)
+	insertActivityEvent(projectID, user.ID, "member.added", map[string]interface{}{"member_name": memberName, "role": "EDITOR"})
+
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Request approved successfully"})
 }
@@ -534,27 +540,54 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	name := user.Name
 	plan := user.Plan
 	emailVerified := user.EmailVerified
+	var onboardingDismissedAt sql.NullTime
 
-	err := db.QueryRow("SELECT email, name, plan, email_verified FROM users WHERE id = ?", user.ID).Scan(&email, &name, &plan, &emailVerified)
+	err := db.QueryRow("SELECT email, name, plan, email_verified, onboarding_dismissed_at FROM users WHERE id = ?", user.ID).
+		Scan(&email, &name, &plan, &emailVerified, &onboardingDismissedAt)
 	if err != nil && err != sql.ErrNoRows {
 		log.Printf("[AUTH] Warning: failed to query live user for me endpoint: %v\n", err)
 	}
+	onboardingDismissed := onboardingDismissedAt.Valid
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":             user.ID,
-		"email":          email,
-		"name":           name,
-		"plan":           plan,
-		"email_verified": emailVerified,
+		"id":                   user.ID,
+		"email":                email,
+		"name":                 name,
+		"plan":                 plan,
+		"email_verified":       emailVerified,
+		"onboarding_dismissed": onboardingDismissed,
 		"user": map[string]interface{}{
-			"id":             user.ID,
-			"email":          email,
-			"name":           name,
-			"plan":           plan,
-			"email_verified": emailVerified,
+			"id":                   user.ID,
+			"email":                email,
+			"name":                 name,
+			"plan":                 plan,
+			"email_verified":       emailVerified,
+			"onboarding_dismissed": onboardingDismissed,
 		},
 	})
+}
+
+// PATCH /api/auth/onboarding
+// Persists dismissal of the dashboard's "Three steps to your first free
+// deploy" checklist (product-memory 08.5 item A6) so it stays dismissed
+// across reloads/devices instead of resetting on every page load. One-way:
+// there's no "un-dismiss" — matches the checklist's own behavior of
+// auto-hiding once a real fact (more than one project) makes it moot.
+func handleDismissOnboarding(w http.ResponseWriter, r *http.Request) {
+	user, ok := GetUserFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if _, err := db.Exec("UPDATE users SET onboarding_dismissed_at = datetime('now') WHERE id = ?", user.ID); err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"onboarding_dismissed": true})
 }
 
 // CanvasState models & handlers
@@ -802,6 +835,8 @@ func handleAddProjectMember(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to add member: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	insertActivityEvent(projectID, user.ID, "member.added", map[string]interface{}{"member_name": payload.Email, "role": payload.Role})
 
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Member added successfully"})
@@ -1068,6 +1103,8 @@ func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	insertActivityEvent(projectID, user.ID, "credential.created", map[string]interface{}{"name": payload.Name, "provider": payload.Provider})
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1081,12 +1118,25 @@ func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 func handleDeleteProjectCredential(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
 	credID := r.PathValue("credId")
+	user, ok := GetUserFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Looked up before the DELETE — the blind delete below leaves nothing to
+	// read these from afterward, and the activity event is more useful with
+	// a real name/provider than just the (soon deleted) credential id.
+	var credName, credProvider string
+	_ = db.QueryRow("SELECT name, provider FROM cloud_credentials WHERE id = ? AND project_id = ?", credID, projectID).Scan(&credName, &credProvider)
 
 	_, err := db.Exec("DELETE FROM cloud_credentials WHERE id = ? AND project_id = ?", credID, projectID)
 	if err != nil {
 		http.Error(w, "Failed to delete credential: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	insertActivityEvent(projectID, user.ID, "credential.revoked", map[string]interface{}{"name": credName, "provider": credProvider})
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Credential deleted successfully"})

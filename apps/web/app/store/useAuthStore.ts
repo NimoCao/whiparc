@@ -7,6 +7,7 @@ interface User {
   email: string;
   plan: string;
   email_verified: boolean;
+  onboarding_dismissed: boolean;
 }
 
 interface AuthState {
@@ -26,6 +27,7 @@ interface AuthState {
   verifyEmail: (token: string) => Promise<{ success: boolean; message?: string; error?: string }>;
   resendVerification: () => Promise<{ success: boolean; message?: string; error?: string }>;
   fetchMe: () => Promise<User | null>;
+  dismissOnboarding: () => Promise<void>;
   setSessionFromToken: (token: string) => boolean;
   logout: () => void;
   clearError: () => void;
@@ -63,6 +65,8 @@ function decodeTokenClaims(token: string): User | null {
       name: claims.name,
       plan: claims.plan,
       email_verified: claims.email_verified ?? false,
+      // Not carried in the JWT — refreshed by the fetchMe() call setSessionFromToken triggers below.
+      onboarding_dismissed: false,
     };
   } catch {
     return null;
@@ -100,6 +104,13 @@ export const useAuthStore = create<AuthState>()(
 
           const data = await res.json();
           set({ token: data.token, user: data.user, isLoading: false });
+          // The login response's `user` predates onboarding_dismissed for a
+          // returning user on a new device/browser (that field only ever
+          // gets refreshed via fetchMe, normally triggered by rehydration on
+          // the *next* page load) — refresh it now so a user who already
+          // dismissed the checklist elsewhere doesn't see it flash back for
+          // one session. Fire-and-forget: never blocks the login flow.
+          void get().fetchMe();
           return true;
         } catch (err: unknown) {
           set({ error: networkErrorMessage(err, 'Login failed'), isLoading: false });
@@ -218,6 +229,7 @@ export const useAuthStore = create<AuthState>()(
             name: data.name || data.user?.name,
             plan: data.plan || data.user?.plan || 'FREE',
             email_verified: Boolean(data.email_verified ?? data.user?.email_verified),
+            onboarding_dismissed: Boolean(data.onboarding_dismissed ?? data.user?.onboarding_dismissed),
           };
           set({ user: fetchedUser });
           return fetchedUser;
@@ -227,10 +239,31 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
+      dismissOnboarding: async () => {
+        const token = get().token;
+        const user = get().user;
+        if (!token || !user) return;
+        // Optimistic — this is a one-way, low-stakes preference; a failed
+        // PATCH just means the checklist reappears on next reload, not a
+        // state a user could get stuck in.
+        set({ user: { ...user, onboarding_dismissed: true } });
+        try {
+          await fetch(`${API_URL}/api/auth/onboarding`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch (err: unknown) {
+          console.error('Failed to persist onboarding dismissal:', err);
+        }
+      },
+
       setSessionFromToken: (token) => {
         const user = decodeTokenClaims(token);
         if (!user) return false;
         set({ token, user, error: null });
+        // onboarding_dismissed isn't in the JWT (see decodeTokenClaims) — same
+        // fire-and-forget refresh as login() below.
+        void get().fetchMe();
         return true;
       },
 

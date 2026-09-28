@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../store/useAuthStore';
@@ -8,12 +8,12 @@ import ProfileMenu from '../components/ProfileMenu';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
-import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon, LogoMark } from '../dashboard/NavIcons';
-import type { Project } from '../lib/types';
+import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon } from '../dashboard/NavIcons';
+import { BrandLogo } from '../components/brand/BrandLogo';
+import type { PipelineRun, RunRow } from '../lib/types';
+import { useAggregatedRuns } from '../lib/useAggregatedRuns';
 import '../components/ui/blueprint.css';
 import './runs.css';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 const NAV_ITEMS: { key: string; label: string; href: string; icon: React.ReactNode }[] = [
   { key: 'overview', label: 'Overview', href: '/dashboard', icon: <GridIcon /> },
@@ -24,24 +24,6 @@ const NAV_ITEMS: { key: string; label: string; href: string; icon: React.ReactNo
   { key: 'team', label: 'Team', href: '/team', icon: <UsersIcon /> },
   { key: 'docs', label: 'Docs', href: '/docs', icon: <BookIcon /> },
 ];
-
-// Mirrors apps/api/main.go's PipelineRun struct exactly — id/status/logs/
-// canvas/createdAt/updatedAt is genuinely all that's stored per run today.
-// No run_type, target, or triggered_by columns exist yet (see the
-// product-memory TODO added alongside this page), so those columns render
-// "—" rather than inventing plausible-looking values.
-interface PipelineRun {
-  id: string;
-  status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
-  logs: string;
-  canvas: string;
-  createdAt: string;
-  updatedAt: string;
-}
-interface RunRow extends PipelineRun {
-  projectId: string;
-  projectName: string;
-}
 
 type StatusFilter = 'all' | 'SUCCESS' | 'FAILED' | 'RUNNING';
 
@@ -82,52 +64,11 @@ export default function RunsPageV2() {
   const isLoggedIn = hasHydrated && !!user;
 
   const [theme, setTheme] = useState<Theme>('dark');
-  const [runs, setRuns] = useState<RunRow[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const { runs, isLoading, error: loadError } = useAggregatedRuns(token);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [logsRun, setLogsRun] = useState<RunRow | null>(null);
   const [showTriggerNote, setShowTriggerNote] = useState(false);
-
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    (async () => {
-      setIsLoading(true);
-      try {
-        const projRes = await fetch(`${API_URL}/api/projects`, { headers: { Authorization: `Bearer ${token}` } });
-        if (!projRes.ok) throw new Error(`Request failed with status ${projRes.status}`);
-        const projects: Project[] = await projRes.json();
-
-        const perProject = await Promise.all(
-          projects.map(async (p) => {
-            try {
-              const res = await fetch(`${API_URL}/api/projects/${p.id}/runs`, { headers: { Authorization: `Bearer ${token}` } });
-              if (!res.ok) return [] as RunRow[];
-              const projectRuns: PipelineRun[] = await res.json();
-              return projectRuns.map((r) => ({ ...r, projectId: p.id, projectName: p.name }));
-            } catch {
-              return [] as RunRow[];
-            }
-          })
-        );
-        if (cancelled) return;
-        const merged = perProject.flat().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setRuns(merged);
-      } catch (err) {
-        if (!cancelled) {
-          const msg = err instanceof Error ? err.message : 'Failed to load runs.';
-          setLoadError(msg.includes('fetch') ? 'Cannot connect to the backend server. Please try again shortly.' : msg);
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
 
   // Captured once (not read fresh inside the memo below, which must stay a
   // pure function of its dependency array) — good enough for a stats panel
@@ -182,16 +123,13 @@ export default function RunsPageV2() {
       <aside style={{ width: 216, flex: 'none', borderRight: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', flexDirection: 'column', position: 'sticky', top: 0, alignSelf: 'flex-start', height: '100vh' }}>
         <div style={{ height: 56, flex: 'none', display: 'flex', alignItems: 'center', gap: 9, padding: '0 16px', borderBottom: '1px solid var(--line)' }}>
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <span style={{ width: 24, height: 24, border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <LogoMark size={24} />
-            </span>
-            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, letterSpacing: '-.02em' }}>whiparc</span>
+            <BrandLogo size={24} />
           </Link>
         </div>
         <nav style={{ padding: '14px 10px', display: 'grid', gap: 2 }}>
           {NAV_ITEMS.map((item) => {
             const active = item.key === 'runs';
-            const style: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', fontSize: 14.5, color: active ? '#fff' : 'var(--ink2)', background: active ? 'var(--accent)' : 'transparent' };
+            const style: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', fontSize: 14.5, color: active ? 'var(--on-accent)' : 'var(--ink2)', background: active ? 'var(--accent)' : 'transparent' };
             return (
               <Link key={item.key} href={item.href} className={active ? undefined : 'wp-runs-navlink'} style={style}>
                 {item.icon}
@@ -203,7 +141,7 @@ export default function RunsPageV2() {
         <div style={{ marginTop: 'auto', padding: 12, borderTop: '1px solid var(--line)' }}>
           {isLoggedIn ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-              <span style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-hover)', color: '#fff', fontFamily: 'var(--font-display)', fontSize: 12 }}>
+              <span style={{ width: 26, height: 26, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-hover)', color: 'var(--on-accent)', fontFamily: 'var(--font-display)', fontSize: 12 }}>
                 {user.name.slice(0, 2).toUpperCase()}
               </span>
               <div style={{ minWidth: 0 }}>
@@ -246,7 +184,7 @@ export default function RunsPageV2() {
               type="button"
               onClick={() => setShowTriggerNote(true)}
               className="wp-blueprint wp-runs-submit"
-              style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, background: 'var(--accent)', color: '#fff', border: 0, cursor: 'pointer' }}
+              style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}
             >
               <Icon icon="lucide:play" width={12} />
               Trigger run
@@ -293,7 +231,7 @@ export default function RunsPageV2() {
                   key={f.id}
                   type="button"
                   onClick={() => setStatusFilter(f.id)}
-                  style={{ height: 30, padding: '0 13px', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, cursor: 'pointer', border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`, background: active ? 'var(--accent)' : 'transparent', color: active ? '#fff' : 'var(--ink2)' }}
+                  style={{ height: 30, padding: '0 13px', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, cursor: 'pointer', border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}`, background: active ? 'var(--accent)' : 'transparent', color: active ? 'var(--on-accent)' : 'var(--ink2)' }}
                 >
                   {f.label}
                 </button>
@@ -332,8 +270,8 @@ export default function RunsPageV2() {
                     <tr key={run.id} className="wp-runs-row">
                       <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink)' }}>{run.id.slice(0, 10)}</td>
                       <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', color: 'var(--ink)' }}>{run.projectName}</td>
-                      <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink3)' }}>—</td>
-                      <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink3)' }}>—</td>
+                      <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink3)' }}>{run.runType?.toLowerCase() ?? '—'}</td>
+                      <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink3)' }}>{run.target ?? '—'}</td>
                       <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink2)' }}>{formatDuration(run.createdAt, run.updatedAt)}</td>
                       <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', color: 'var(--ink2)' }}>{timeAgo(run.createdAt)}</td>
                       <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)' }}>
@@ -367,14 +305,21 @@ export default function RunsPageV2() {
           >
             <BlueprintCorners />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15, color: 'var(--ink)' }}>
-                {logsRun.projectName} · {logsRun.id.slice(0, 10)}
-              </p>
+              <div>
+                <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15, color: 'var(--ink)' }}>
+                  {logsRun.projectName} · {logsRun.id.slice(0, 10)}
+                </p>
+                {logsRun.triggeredBy && (
+                  <p style={{ margin: '2px 0 0', fontSize: 11.5, color: 'var(--ink3)' }}>
+                    Triggered by {logsRun.triggeredBy.name}
+                  </p>
+                )}
+              </div>
               <button type="button" onClick={() => setLogsRun(null)} className="wp-runs-iconbtn" style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink2)', cursor: 'pointer' }}>
                 <Icon icon="lucide:x" width={14} />
               </button>
             </div>
-            <pre style={{ margin: 0, flex: 1, overflow: 'auto', background: '#07080B', border: '1px solid #1E2233', padding: 14, fontFamily: 'var(--font-mono-marketing), monospace', fontSize: 12, lineHeight: 1.6, color: '#CBD5E1', whiteSpace: 'pre-wrap' }}>
+            <pre style={{ margin: 0, flex: 1, overflow: 'auto', background: '#101114', border: '1px solid #2A2C33', padding: 14, fontFamily: 'var(--font-mono-marketing), monospace', fontSize: 12, lineHeight: 1.6, color: '#CBD5E1', whiteSpace: 'pre-wrap' }}>
               {logsRun.logs || '(no logs recorded for this run)'}
             </pre>
           </div>

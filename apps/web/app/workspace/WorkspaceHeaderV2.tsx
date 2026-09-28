@@ -28,6 +28,8 @@ export interface WorkspaceHeaderV2Props {
   onExportFormat: (format: string) => void;
   onDeploy: () => void;
   deployStatus: string;
+  onPlan: () => void;
+  planStatus: string;
   autoDestroy: boolean;
   onAutoDestroyChange: (val: boolean) => void;
   onDestroy: () => void;
@@ -82,6 +84,8 @@ export function WorkspaceHeaderV2({
   onExportFormat,
   onDeploy,
   deployStatus,
+  onPlan,
+  planStatus,
   autoDestroy,
   onAutoDestroyChange,
   onDestroy,
@@ -95,6 +99,7 @@ export function WorkspaceHeaderV2({
 }: WorkspaceHeaderV2Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const isBusy = deployStatus === 'RUNNING' || deployStatus === 'PENDING' || deployStatus === 'CLEANUP';
+  const isPlanBusy = planStatus === 'RUNNING' || planStatus === 'PENDING';
 
   const tabs: { key: WorkspaceView; label: string }[] = [
     { key: 'canvas', label: 'Canvas' },
@@ -139,7 +144,7 @@ export function WorkspaceHeaderV2({
               fontFamily: 'var(--font-display, inherit)',
               fontWeight: 600,
               background: activeView === t.key ? 'var(--accent)' : 'transparent',
-              color: activeView === t.key ? '#fff' : 'var(--ink2)',
+              color: activeView === t.key ? 'var(--on-accent)' : 'var(--ink2)',
               border: 0,
               borderLeft: t.key === 'canvas' ? undefined : '1px solid var(--line)',
             }}
@@ -280,15 +285,15 @@ export function WorkspaceHeaderV2({
                 <button
                   type="button"
                   onClick={() => {
-                    if (!isBusy) {
+                    if (!isBusy && !isPlanBusy) {
                       onClearCanvas();
                       setMenuOpen(false);
                     }
                   }}
-                  disabled={isBusy}
+                  disabled={isBusy || isPlanBusy}
                   title="Delete every node and connection on this canvas"
                   className="wp-ws-navlink"
-                  style={{ ...menuItemStyle, color: 'var(--danger)', opacity: isBusy ? 0.5 : 1, cursor: isBusy ? 'default' : 'pointer' }}
+                  style={{ ...menuItemStyle, color: 'var(--danger)', opacity: isBusy || isPlanBusy ? 0.5 : 1, cursor: isBusy || isPlanBusy ? 'default' : 'pointer' }}
                 >
                   <Icon icon="lucide:eraser" width={12} />
                   Clear canvas
@@ -297,15 +302,15 @@ export function WorkspaceHeaderV2({
                 <button
                   type="button"
                   onClick={() => {
-                    if (!isBusy && !autoDestroy) {
+                    if (!isBusy && !isPlanBusy && !autoDestroy) {
                       onDestroy();
                       setMenuOpen(false);
                     }
                   }}
-                  disabled={isBusy || autoDestroy}
+                  disabled={isBusy || isPlanBusy || autoDestroy}
                   title={autoDestroy ? 'Destroy is disabled when Auto-Cleanup is enabled' : 'Tear down all canvas-provisioned resources'}
                   className="wp-ws-navlink"
-                  style={{ ...menuItemStyle, color: 'var(--danger)', opacity: isBusy || autoDestroy ? 0.5 : 1, cursor: isBusy || autoDestroy ? 'default' : 'pointer' }}
+                  style={{ ...menuItemStyle, color: 'var(--danger)', opacity: isBusy || isPlanBusy || autoDestroy ? 0.5 : 1, cursor: isBusy || isPlanBusy || autoDestroy ? 'default' : 'pointer' }}
                 >
                   <Icon icon="lucide:trash-2" width={12} />
                   Destroy
@@ -333,14 +338,38 @@ export function WorkspaceHeaderV2({
             gap: 6,
           }}
         >
-          <Icon icon="lucide:play" width={12} />
+          <Icon icon="lucide:file-code" width={12} />
+          Preview
+        </button>
+
+        <button
+          type="button"
+          onClick={onPlan}
+          disabled={isPlanBusy || isBusy}
+          title="Run a real terraform plan — shows what would change without applying anything"
+          className="wp-ws-iconbtn"
+          style={{
+            height: 30,
+            padding: '0 13px',
+            fontSize: 13,
+            border: '1px solid var(--line)',
+            background: 'transparent',
+            color: 'var(--ink)',
+            cursor: isPlanBusy || isBusy ? 'default' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            opacity: isPlanBusy || isBusy ? 0.6 : 1,
+          }}
+        >
+          <Icon icon={isPlanBusy ? 'lucide:loader-2' : 'lucide:play'} className={isPlanBusy ? 'animate-spin' : undefined} width={12} />
           Plan
         </button>
 
         <button
           type="button"
           onClick={onDeploy}
-          disabled={isBusy}
+          disabled={isBusy || isPlanBusy}
           className="wp-blueprint"
           style={{
             position: 'relative',
@@ -350,13 +379,13 @@ export function WorkspaceHeaderV2({
             fontFamily: 'var(--font-display, inherit)',
             fontWeight: 600,
             background: 'var(--accent)',
-            color: '#fff',
+            color: 'var(--on-accent)',
             border: 0,
-            cursor: isBusy ? 'default' : 'pointer',
+            cursor: isBusy || isPlanBusy ? 'default' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             gap: 6,
-            opacity: isBusy ? 0.7 : 1,
+            opacity: isBusy || isPlanBusy ? 0.7 : 1,
           }}
         >
           <BlueprintCorners />

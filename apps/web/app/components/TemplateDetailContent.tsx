@@ -230,7 +230,7 @@ export function TemplateDetailContent({ id, variant }: TemplateDetailContentProp
             onClick={handleGetStarted}
             disabled={isForking}
             className="wp-templates-submit"
-            style={{ height: 38, padding: '0 22px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 600, fontFamily: 'var(--font-display)', background: 'var(--accent)', color: '#fff', border: 0, cursor: isForking ? 'not-allowed' : 'pointer', opacity: isForking ? 0.6 : 1 }}
+            style={{ height: 38, padding: '0 22px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 600, fontFamily: 'var(--font-display)', background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: isForking ? 'not-allowed' : 'pointer', opacity: isForking ? 0.6 : 1 }}
           >
             {isForking ? (
               <>

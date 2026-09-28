@@ -14,20 +14,22 @@ import '../ui/blueprint.css';
 import './marketing-v2.css';
 
 const rootStyle: CSSProperties = {
-  ['--ground' as string]: '#07080B',
-  ['--panel' as string]: '#0D0F16',
-  ['--line' as string]: '#1E2233',
-  ['--ink' as string]: '#FFFFFF',
-  ['--ink2' as string]: '#94A3B8',
-  ['--accent-ink' as string]: '#9EA2F9',
-  ['--accent' as string]: '#6366F1',
+  ['--ground' as string]: '#101114',
+  ['--panel' as string]: '#17181C',
+  ['--line' as string]: '#2A2C33',
+  ['--ink' as string]: '#F5F5F6',
+  ['--ink2' as string]: '#A3A6AF',
+  ['--accent-ink' as string]: '#FF8A63',
+  ['--accent' as string]: '#FF6A3D',
+  ['--on-accent' as string]: '#101114',
   ['--amber' as string]: '#F59E0B',
+  ['--success' as string]: '#10B981',
   ['--chip' as string]: 'rgba(255,255,255,.04)',
-  ['--ink3' as string]: '#64748B',
+  ['--ink3' as string]: '#7B7E88',
   ['--k8s-ink' as string]: '#7DD3FC',
   ['--target-ink' as string]: '#5EEAD4',
-  background: '#07080B',
-  color: '#FFFFFF',
+  background: '#101114',
+  color: '#F5F5F6',
 };
 
 export default function MarketingPageV2() {

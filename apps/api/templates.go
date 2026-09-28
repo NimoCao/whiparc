@@ -354,6 +354,8 @@ func handlePublishProjectAsTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	insertActivityEvent(projectID, user.ID, "template.published", map[string]interface{}{"title": title})
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"id": templateID})
 }

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Icon } from '@iconify/react';
 import { Seam } from './Seam';
 import { useMarketingCta } from './useMarketingCta';
+import { BrandLogo } from '../brand/BrandLogo';
 
 export function Footer() {
   const { startHref } = useMarketingCta();
@@ -30,7 +31,7 @@ export function Footer() {
           </h2>
           <Link
             href={startHref}
-            style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'var(--accent)', color: '#FFFFFF', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15, padding: '14px 24px', whiteSpace: 'nowrap' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'var(--accent)', color: 'var(--on-accent)', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15, padding: '14px 24px', whiteSpace: 'nowrap' }}
           >
             <span>Open the canvas</span>
             <Icon icon="lucide:arrow-right" width={16} />
@@ -38,7 +39,8 @@ export function Footer() {
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px 40px', justifyContent: 'space-between', paddingTop: 22, fontFamily: 'var(--font-mono-marketing)', fontSize: 11, letterSpacing: '.08em', color: 'var(--ink2)' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 18px', alignItems: 'center' }}>
-            <span style={{ whiteSpace: 'nowrap' }}>whiparc · open source infrastructure compiler</span>
+            <BrandLogo size={20} style={{ color: 'var(--ink)' }} />
+            <span style={{ whiteSpace: 'nowrap' }}>open source infrastructure compiler</span>
             <span style={{ whiteSpace: 'nowrap', opacity: 0.8 }}>© 2026 whiparc</span>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18 }}>

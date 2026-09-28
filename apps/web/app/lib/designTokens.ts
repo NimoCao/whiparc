@@ -68,9 +68,9 @@ export const colors = {
       active: '#2d3a54', // Even lighter
     },
     text: {
-      primary: '#f1f5f9', // Near white
+      primary: '#F5F5F6', // Near white
       secondary: '#cbd5e1', // Light gray
-      tertiary: '#94a3b8', // Medium gray
+      tertiary: '#A3A6AF', // Medium gray
     },
     border: '#475569', // Border color
   },

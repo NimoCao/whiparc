@@ -530,6 +530,80 @@ func RunPipeline(
 	}
 
 	// ==========================================
+	// ACTION: PLAN (DRY RUN)
+	// ==========================================
+	// Deliberately Terraform-only and read-only, per product-memory 08.5 item
+	// A9's "keep v1 simple" scoping: writes the compiled files, runs `terraform
+	// init` + `plan` (no -auto-approve — plan never mutates state), and stops.
+	// No Ansible/Kubernetes phases (a "dry run" of a config-management/K8s
+	// apply isn't the same operation and isn't what this feature asks for),
+	// no local_agent/SSH routing (never reached, since Ansible is skipped),
+	// no auto-destroy (nothing was created to destroy), and no per-node
+	// status animation (a node isn't "completed" just because a plan
+	// mentioned it — that would misleadingly imply it's actually provisioned).
+	if action == "plan" {
+		emitSliceStatus(allNodeIDs, "pending")
+
+		for _, file := range files {
+			fullPath := filepath.Join(runDir, file.Path)
+			dirPath := filepath.Dir(fullPath)
+			if err := os.MkdirAll(dirPath, 0755); err != nil {
+				emit(fmt.Sprintf("[ERROR] Failed to create dir %s: %v", dirPath, err))
+				onComplete("FAILED", accumulatedLogs)
+				return
+			}
+			content := file.Content
+			if file.Path == "terraform/main.tf" {
+				content = strings.ReplaceAll(content, "http://localhost:4566", fmt.Sprintf("http://%s:4566", localstackHost))
+			}
+			if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+				emit(fmt.Sprintf("[ERROR] Failed to write file %s: %v", file.Path, err))
+				onComplete("FAILED", accumulatedLogs)
+				return
+			}
+			emit(fmt.Sprintf("[COMPILER] Created %s", file.Path))
+		}
+
+		if !hasTfNodes || !fileExists(filepath.Join(tfDir, "main.tf")) {
+			emit("\n[RUNNER] No Terraform configuration on this canvas — nothing to plan.")
+			onComplete("SUCCESS", accumulatedLogs)
+			return
+		}
+
+		emit("\n=========================================")
+		emit("[PHASE 01] Terraform Plan (Dry Run — No Changes Applied)")
+		emit("=========================================\n")
+
+		if isDocker && isSandboxRun {
+			emit("[RUNNER] Ensuring LocalStack S3 state bucket exists...")
+			_ = spawnCommand("curl", []string{"-X", "PUT", fmt.Sprintf("http://%s:4566/whiparc-state-bucket", localstackHost)}, runDir, nil, redactor, logChan)
+			// Deliberately no AMI pre-registration here (unlike the deploy
+			// path): a plan never calls the provider to validate a new
+			// resource's own attribute values like an AMI ID, only init's
+			// backend/provider setup — so the placeholder AMI in main.tf is
+			// harmless for a plan and patching it would be dead work.
+		}
+
+		_ = os.Remove(filepath.Join(tfDir, ".terraform", "terraform.tfstate"))
+		if err := spawnCommand("terraform", []string{"init", "-reconfigure", "-input=false", "-force-copy"}, tfDir, tfEnv, redactor, logChan); err != nil {
+			emit(fmt.Sprintf("[ERROR] Terraform init failed: %v", err))
+			onComplete("FAILED", accumulatedLogs)
+			return
+		}
+
+		planErr := spawnCommand("terraform", []string{"plan", "-input=false"}, tfDir, tfEnv, redactor, logChan)
+		if planErr != nil {
+			emit(fmt.Sprintf("[ERROR] Terraform plan failed: %v", planErr))
+			onComplete("FAILED", accumulatedLogs)
+			return
+		}
+
+		emit("\n[RUNNER] Plan completed — no changes were made.")
+		onComplete("SUCCESS", accumulatedLogs)
+		return
+	}
+
+	// ==========================================
 	// ACTION: DEPLOY (DEFAULT)
 	// ==========================================
 	emitSliceStatus(allNodeIDs, "pending")

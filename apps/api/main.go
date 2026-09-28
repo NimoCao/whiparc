@@ -44,12 +44,74 @@ func truncateLogs(logs string) string {
 }
 
 type PipelineRun struct {
-	ID        string    `json:"id"`
-	Status    string    `json:"status"` // PENDING, RUNNING, SUCCESS, FAILED
-	Logs      string    `json:"logs"`
-	Canvas    string    `json:"canvas"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID          string           `json:"id"`
+	Status      string           `json:"status"` // PENDING, RUNNING, SUCCESS, FAILED
+	Logs        string           `json:"logs"`
+	Canvas      string           `json:"canvas"`
+	RunType     *string          `json:"runType"`
+	Target      *string          `json:"target"`
+	TriggeredBy *TriggeredByInfo `json:"triggeredBy"`
+	CreatedAt   time.Time        `json:"createdAt"`
+	UpdatedAt   time.Time        `json:"updatedAt"`
+}
+
+// TriggeredByInfo is populated from a LEFT JOIN against users at read time
+// rather than a denormalized column on pipeline_runs — see
+// obsidian_memory/08.6 section 2.3. Nil (serializes as JSON null) when
+// user_id is NULL, either because the run predates that column or because
+// its user was later removed.
+type TriggeredByInfo struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// deriveRunTarget scans a run's canvas for the first node with a non-empty
+// Data.Environment and formats a short human-readable target string. Kept
+// deliberately simple (first match wins, no multi-cloud/"mixed" labels) per
+// obsidian_memory/08.6 section 2.4 — no mockup or backlog item asks for
+// more, and it adds real complexity for a case that doesn't exist in current
+// seed data or templates. Returns "" (stored as NULL) when no node declares
+// an environment.
+func deriveRunTarget(canvasStr string) string {
+	var canvas struct {
+		Nodes []importer.CanvasNode `json:"nodes"`
+	}
+	if err := json.Unmarshal([]byte(canvasStr), &canvas); err != nil {
+		return ""
+	}
+	for _, node := range canvas.Nodes {
+		env := node.Data.Environment
+		if env == "" {
+			continue
+		}
+		switch env {
+		case "aws":
+			if node.Data.Region != "" {
+				return "AWS · " + node.Data.Region
+			}
+			return "AWS"
+		case "gcp":
+			if node.Data.GcpZone != "" {
+				return "GCP · " + node.Data.GcpZone
+			}
+			return "GCP"
+		default:
+			return strings.ToUpper(env)
+		}
+	}
+	return ""
+}
+
+// nullIfEmpty lets an empty derived target be stored as SQL NULL (renders
+// "—" client-side) instead of an empty string, matching the "no node had an
+// environment set" case to "not implemented yet" rather than a distinct
+// empty-but-present value — see obsidian_memory/08.6 section 2.4.
+func nullIfEmpty(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 type RunTracker struct {
@@ -225,6 +287,7 @@ func main() {
 	mux.HandleFunc("GET /api/runs/{id}", enableCORS(handleGetRunByID))
 	mux.Handle("POST /api/projects/{id}/deploy", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleDeploy))))
 	mux.Handle("POST /api/projects/{id}/destroy", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleDestroy))))
+	mux.Handle("POST /api/projects/{id}/plan", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handlePlan))))
 	mux.HandleFunc("/api/ws/runs/{id}", handleWebSocket)
 
 	// Auth & Workspace Sync Routes
@@ -235,6 +298,8 @@ func main() {
 	mux.Handle("POST /api/auth/resend-verification", AuthMiddleware(http.HandlerFunc(handleResendVerification)))
 	mux.Handle("POST /api/auth/upgrade", AuthMiddleware(http.HandlerFunc(handleUpgradePlan)))
 	mux.Handle("GET /api/auth/me", AuthMiddleware(http.HandlerFunc(handleMe)))
+	mux.Handle("PATCH /api/auth/onboarding", AuthMiddleware(http.HandlerFunc(handleDismissOnboarding)))
+	mux.Handle("GET /api/activity", AuthMiddleware(http.HandlerFunc(handleGetActivity)))
 	mux.HandleFunc("GET /api/auth/{provider}/login", handleOAuthLogin)
 	mux.HandleFunc("GET /api/auth/{provider}/callback", handleOAuthCallback)
 	mux.HandleFunc("GET /api/workspace/{projectId}/sync", handleWorkspaceWebSocketSync)
@@ -403,9 +468,48 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+// runsWithTriggeredByQuery is shared by handleGetRuns and handleGetRunByID.
+// LEFT JOIN (not INNER) so rows with user_id IS NULL — pre-existing rows
+// from before the user_id column even existed — still return, with
+// name/email as SQL NULL, surfaced as triggeredBy: null client-side. See
+// obsidian_memory/08.6 section 2.3.
+const runsWithTriggeredByQuery = `SELECT pr.id, pr.status, pr.logs, pr.canvas, pr.run_type, pr.target,
+       pr.user_id, u.name, u.email, pr.created_at, pr.updated_at
+FROM pipeline_runs pr
+LEFT JOIN users u ON pr.user_id = u.id`
+
+func scanPipelineRun(scanner interface{ Scan(...any) error }) (PipelineRun, error) {
+	var run PipelineRun
+	var runType, target, userID, userName, userEmail sql.NullString
+	// Scanned directly into time.Time rather than a string re-parsed with a
+	// fixed layout: modernc.org/sqlite returns a DATETIME column's value
+	// already as RFC3339 ("2026-09-22T11:40:14Z") when the destination is a
+	// string, which the previous "2006-01-02 15:04:05" layout (matched to
+	// SQLite's own datetime('now') text format) couldn't parse — it failed
+	// silently (error discarded) on every row, leaving CreatedAt/UpdatedAt
+	// at Go's zero value and rendering as "739880d ago" client-side. Both
+	// database/sql drivers used here (modernc.org/sqlite, pgx/v5/stdlib)
+	// natively support scanning a timestamp column straight into time.Time.
+	err := scanner.Scan(&run.ID, &run.Status, &run.Logs, &run.Canvas, &runType, &target,
+		&userID, &userName, &userEmail, &run.CreatedAt, &run.UpdatedAt)
+	if err != nil {
+		return run, err
+	}
+	if runType.Valid {
+		run.RunType = &runType.String
+	}
+	if target.Valid {
+		run.Target = &target.String
+	}
+	if userID.Valid {
+		run.TriggeredBy = &TriggeredByInfo{ID: userID.String, Name: userName.String, Email: userEmail.String}
+	}
+	return run, nil
+}
+
 func handleGetRuns(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
-	rows, err := db.Query("SELECT id, status, logs, canvas, created_at, updated_at FROM pipeline_runs WHERE project_id = ? ORDER BY created_at DESC", projectID)
+	rows, err := db.Query(runsWithTriggeredByQuery+" WHERE pr.project_id = ? ORDER BY pr.created_at DESC", projectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -414,15 +518,11 @@ func handleGetRuns(w http.ResponseWriter, r *http.Request) {
 
 	runs := []PipelineRun{}
 	for rows.Next() {
-		var run PipelineRun
-		var createdStr, updatedStr string
-		err := rows.Scan(&run.ID, &run.Status, &run.Logs, &run.Canvas, &createdStr, &updatedStr)
+		run, err := scanPipelineRun(rows)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		run.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", strings.Replace(createdStr, "T", " ", 1))
-		run.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", strings.Replace(updatedStr, "T", " ", 1))
 		runs = append(runs, run)
 	}
 	if err = rows.Err(); err != nil {
@@ -441,10 +541,8 @@ func handleGetRunByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row := db.QueryRow("SELECT id, status, logs, canvas, created_at, updated_at FROM pipeline_runs WHERE id = ?", id)
-	var run PipelineRun
-	var createdStr, updatedStr string
-	err := row.Scan(&run.ID, &run.Status, &run.Logs, &run.Canvas, &createdStr, &updatedStr)
+	row := db.QueryRow(runsWithTriggeredByQuery+" WHERE pr.id = ?", id)
+	run, err := scanPipelineRun(row)
 	if err == sql.ErrNoRows {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -454,9 +552,6 @@ func handleGetRunByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	run.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", strings.Replace(createdStr, "T", " ", 1))
-	run.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", strings.Replace(updatedStr, "T", " ", 1))
 
 	trackersMutex.Lock()
 	tracker, active := trackers[id]
@@ -601,10 +696,11 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runID := generateUUID()
+	target := deriveRunTarget(canvasStr)
 
 	// Insert into DB as PENDING
-	insertQuery := "INSERT INTO pipeline_runs (id, project_id, user_id, status, logs, canvas, created_at, updated_at) VALUES (?, ?, ?, 'PENDING', '', ?, datetime('now'), datetime('now'))"
-	_, err = db.Exec(insertQuery, runID, projectID, user.ID, canvasStr)
+	insertQuery := "INSERT INTO pipeline_runs (id, project_id, user_id, status, logs, canvas, run_type, target, created_at, updated_at) VALUES (?, ?, ?, 'PENDING', '', ?, 'apply', ?, datetime('now'), datetime('now'))"
+	_, err = db.Exec(insertQuery, runID, projectID, user.ID, canvasStr, nullIfEmpty(target))
 	if err != nil {
 		log.Printf("[DB] Error inserting new run %s: %v\n", runID, err)
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
@@ -665,6 +761,12 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[DB] Error updating run %s: %v\n", runID, err)
 			}
 
+			if finalStatus == "SUCCESS" {
+				insertActivityEvent(projectID, user.ID, "deploy.succeeded", map[string]interface{}{"target": target})
+			} else if finalStatus == "FAILED" {
+				insertActivityEvent(projectID, user.ID, "deploy.failed", map[string]interface{}{"target": target})
+			}
+
 			// Broadcast status change
 			tracker.Lock()
 			tracker.status = finalStatus
@@ -687,6 +789,178 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 			})
 
 			log.Printf("[RUNNER] Pipeline run %s completed with status: %s\n", runID, finalStatus)
+		})
+	}()
+}
+
+// POST /api/projects/{id}/plan
+// A real `terraform plan` dry run (product-memory 08.5 item A9) — not the
+// workspace's pre-existing "Plan" button, which was actually just a
+// view-switcher to the compiled-output tab (renamed to "Preview" alongside
+// this shipping). Deliberately skips every pre-flight check that only
+// exists for handleDeploy's Ansible/local_agent path: no SSH-credential
+// requirement (plan never runs Ansible), no paired-agent
+// PENDING/DISCONNECTED gate (same reason), and no FREE-tier sandbox gating
+// (a plan is cheap/read-only, not the cost-bearing hosted sandbox that gate
+// exists to protect). See runner.RunPipeline's "ACTION: PLAN" branch for
+// what actually runs.
+func handlePlan(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	user, _ := GetUserFromContext(r)
+
+	var payload DeployPayload
+	err := json.NewDecoder(r.Body).Decode(&payload)
+	if err != nil {
+		http.Error(w, "Invalid request payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var canvasStr string
+	var canvasNodesJSON, canvasEdgesJSON string
+
+	if payload.Canvas == nil {
+		err = db.QueryRow("SELECT nodes_json, edges_json FROM canvas_states WHERE project_id = ?", projectID).Scan(&canvasNodesJSON, &canvasEdgesJSON)
+		if err == sql.ErrNoRows {
+			canvasNodesJSON = "[]"
+			canvasEdgesJSON = "[]"
+		} else if err != nil {
+			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		canvasStr = fmt.Sprintf(`{"nodes":%s,"edges":%s}`, canvasNodesJSON, canvasEdgesJSON)
+	} else {
+		canvasBytes, err := json.Marshal(payload.Canvas)
+		if err != nil {
+			http.Error(w, "Invalid canvas format", http.StatusBadRequest)
+			return
+		}
+		canvasStr = string(canvasBytes)
+
+		var canvasStruct struct {
+			Nodes []importer.CanvasNode `json:"nodes"`
+			Edges []importer.CanvasEdge `json:"edges"`
+		}
+		_ = json.Unmarshal(canvasBytes, &canvasStruct)
+
+		if len(payload.Files) == 0 {
+			compiledFiles, err := importer.CompileCanvas(canvasStruct.Nodes, canvasStruct.Edges)
+			if err == nil {
+				for _, f := range compiledFiles {
+					payload.Files = append(payload.Files, runner.FileItem{
+						Path:    f.Path,
+						Content: f.Content,
+					})
+				}
+			}
+		}
+	}
+
+	if len(payload.Files) == 0 && canvasNodesJSON != "" {
+		var nodes []importer.CanvasNode
+		var edges []importer.CanvasEdge
+		_ = json.Unmarshal([]byte(canvasNodesJSON), &nodes)
+		_ = json.Unmarshal([]byte(canvasEdgesJSON), &edges)
+
+		compiledFiles, err := importer.CompileCanvas(nodes, edges)
+		if err == nil {
+			for _, f := range compiledFiles {
+				payload.Files = append(payload.Files, runner.FileItem{
+					Path:    f.Path,
+					Content: f.Content,
+				})
+			}
+		}
+	}
+
+	// Still resolved (not skipped) so a live-AWS/GCP plan can actually reach
+	// the real provider with real credentials, exactly like deploy — just
+	// without deploy's SSH-credential requirement, since plan never reaches
+	// the Ansible phase that needs one.
+	extraEnv, secretsToMask, _ := extractSecretsAndEnvironment(projectID, canvasStr)
+
+	runID := generateUUID()
+	target := deriveRunTarget(canvasStr)
+
+	insertQuery := "INSERT INTO pipeline_runs (id, project_id, user_id, status, logs, canvas, run_type, target, created_at, updated_at) VALUES (?, ?, ?, 'PENDING', '', ?, 'plan', ?, datetime('now'), datetime('now'))"
+	_, err = db.Exec(insertQuery, runID, projectID, user.ID, canvasStr, nullIfEmpty(target))
+	if err != nil {
+		log.Printf("[DB] Error inserting new plan run %s: %v\n", runID, err)
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	tracker := &RunTracker{
+		clients:      make(map[*websocket.Conn]bool),
+		status:       "PENDING",
+		nodeStatuses: make(map[string]string),
+	}
+	trackersMutex.Lock()
+	trackers[runID] = tracker
+	trackersMutex.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"runId":  runID,
+		"status": "PENDING",
+	})
+
+	go func() {
+		_, _ = db.Exec("UPDATE pipeline_runs SET status = 'RUNNING', updated_at = datetime('now') WHERE id = ?", runID)
+		tracker.Lock()
+		tracker.status = "RUNNING"
+		tracker.Unlock()
+		broadcastToTracker(runID, "status_change", "RUNNING")
+
+		logChan := make(chan string, 100)
+		go func() {
+			for msg := range logChan {
+				tracker.Lock()
+				tracker.logs += msg
+				tracker.Unlock()
+				broadcastToTracker(runID, "log", msg)
+			}
+		}()
+
+		runner.RunPipeline(runID, canvasStr, payload.Files, "plan", false, extraEnv, secretsToMask, nil, logChan, func(nodeId, status string) {
+			broadcastNodeStatus(runID, nodeId, status)
+		}, func(status string) {
+			broadcastToTracker(runID, "status_change", status)
+		}, func(finalStatus string, logs string) {
+			tracker.Lock()
+			finalLogs := truncateLogs(tracker.logs)
+			tracker.Unlock()
+
+			_, err = db.Exec("UPDATE pipeline_runs SET status = ?, logs = ?, updated_at = datetime('now') WHERE id = ?", finalStatus, finalLogs, runID)
+			if err != nil {
+				log.Printf("[DB] Error updating plan run %s: %v\n", runID, err)
+			}
+
+			if finalStatus == "SUCCESS" {
+				insertActivityEvent(projectID, user.ID, "plan.succeeded", map[string]interface{}{"target": target})
+			} else if finalStatus == "FAILED" {
+				insertActivityEvent(projectID, user.ID, "plan.failed", map[string]interface{}{"target": target})
+			}
+
+			tracker.Lock()
+			tracker.status = finalStatus
+			tracker.Unlock()
+			broadcastToTracker(runID, "status_change", finalStatus)
+
+			time.AfterFunc(2*time.Second, func() {
+				trackersMutex.Lock()
+				t, exists := trackers[runID]
+				if exists {
+					t.Lock()
+					for client := range t.clients {
+						_ = client.Close()
+					}
+					t.Unlock()
+					delete(trackers, runID)
+				}
+				trackersMutex.Unlock()
+			})
+
+			log.Printf("[RUNNER] Plan run %s completed with status: %s\n", runID, finalStatus)
 		})
 	}()
 }
@@ -877,10 +1151,11 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runID := generateUUID()
+	target := deriveRunTarget(canvasStr)
 
 	// Insert into DB as PENDING
-	insertQuery := "INSERT INTO pipeline_runs (id, project_id, user_id, status, logs, canvas, created_at, updated_at) VALUES (?, ?, ?, 'PENDING', '', ?, datetime('now'), datetime('now'))"
-	_, err = db.Exec(insertQuery, runID, projectID, user.ID, canvasStr)
+	insertQuery := "INSERT INTO pipeline_runs (id, project_id, user_id, status, logs, canvas, run_type, target, created_at, updated_at) VALUES (?, ?, ?, 'PENDING', '', ?, 'destroy', ?, datetime('now'), datetime('now'))"
+	_, err = db.Exec(insertQuery, runID, projectID, user.ID, canvasStr, nullIfEmpty(target))
 	if err != nil {
 		log.Printf("[DB] Error inserting destroy run %s: %v\n", runID, err)
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
@@ -936,6 +1211,12 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 			_, err = db.Exec("UPDATE pipeline_runs SET status = ?, logs = ?, updated_at = datetime('now') WHERE id = ?", finalStatus, finalLogs, runID)
 			if err != nil {
 				log.Printf("[DB] Error updating destroy run %s: %v\n", runID, err)
+			}
+
+			if finalStatus == "SUCCESS" {
+				insertActivityEvent(projectID, user.ID, "destroy.succeeded", map[string]interface{}{"target": target})
+			} else if finalStatus == "FAILED" {
+				insertActivityEvent(projectID, user.ID, "destroy.failed", map[string]interface{}{"target": target})
 			}
 
 			tracker.Lock()

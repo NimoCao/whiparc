@@ -12,7 +12,7 @@
 }
 
 .wp-root a:hover {
-  color: #9ea2f9;
+  color: #FF8A63;
 }
 
 /* .wp-blueprint / .wp-corner now live in ../ui/blueprint.css, shared with
@@ -53,14 +53,20 @@
   }
 }
 
-/* Pinned scrollytelling track heights — the extra height above 100vh is
+/* "How it works" (.wp-stage-track) was lengthened on 2026-09-25: at 260vh
+   its three stages got only ~53vh of scroll each on desktop (23-30vh on
+   phones), too little for the graph to be read as it drew. It now gets ~93vh
+   per stage on desktop, ~53vh on tablets and ~45vh on phones. The limits
+   track below is unchanged.
+
+   Pinned scrollytelling track heights — the extra height above 100vh is
    the actual scroll distance MarketingEngine's frame() spends walking the
    stages/cards through. Shorter on narrow viewports both because the
    tracks feel longer per swipe on mobile and because there's less
    horizontal content competing for attention while pinned. */
 .wp-stage-track {
   position: relative;
-  height: 260vh;
+  height: 380vh;
 }
 
 .wp-limit-track {
@@ -70,7 +76,7 @@
 
 @media (max-width: 767px) {
   .wp-stage-track {
-    height: 190vh;
+    height: 260vh;
   }
 
   .wp-limit-track {
@@ -80,7 +86,7 @@
 
 @media (max-width: 480px) {
   .wp-stage-track {
-    height: 170vh;
+    height: 235vh;
   }
 
   .wp-limit-track {
@@ -106,6 +112,56 @@
      overflow:hidden) to showing one illegible truncated word fragment —
      drop it entirely rather than show a fragment. */
   [data-navlinks] {
+    display: none !important;
+  }
+}
+
+/* "How it works" stage-0 canvas. MarketingEngine only flips data-on on nodes,
+   connectors and chevrons as the scroll passes each one's threshold; the
+   motion itself is these transitions, so it plays smoothly regardless of how
+   coarsely the wheel scrolls. The default (no data-on yet) is fully drawn, so
+   the graph is visible before the engine attaches. */
+[data-node] {
+  transition: opacity 0.7s cubic-bezier(0.22, 0.7, 0.3, 1), transform 0.7s cubic-bezier(0.22, 0.7, 0.3, 1);
+}
+
+[data-node][data-on='false'] {
+  opacity: 0;
+  transform: translateY(10px) scale(0.985);
+}
+
+[data-edge] {
+  transition: stroke-dashoffset 1.1s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* The chevron waits for the line to arrive when switching on, and leaves
+   immediately when switching off. */
+[data-tip] {
+  transition: opacity 0.15s ease;
+}
+
+[data-tip][data-on='false'] {
+  opacity: 0;
+}
+
+[data-tip][data-on='true'] {
+  opacity: 1;
+  transition: opacity 0.3s ease 0.95s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-node],
+  [data-edge],
+  [data-tip] {
+    transition: none !important;
+  }
+}
+
+/* The status tag sits on the node's top border, where the connector's
+   chevron lands on narrow stages; drop it there rather than collide.
+   !important because the tag sets `display: flex` inline. */
+@media (max-width: 640px) {
+  [data-node] .wp-node-tag {
     display: none !important;
   }
 }
