@@ -43,6 +43,30 @@ func sanitizeName(name string) string {
 	return strings.TrimSpace(unsafeNameCharsPattern.ReplaceAllString(clean, ""))
 }
 
+// safeEmailNamePattern is the same allowlist as unsafeNameCharsPattern's
+// inverse, expressed as a whole-string match for validateEmailContentName.
+var safeEmailNamePattern = regexp.MustCompile(`^[A-Za-z0-9 ._-]{1,100}$`)
+
+// validateEmailContentName is the call-site guard for any user-controlled
+// name (account name, team name) interpolated into an outbound email's
+// subject or body. Unlike sanitizeName — which transforms its input by
+// stripping disallowed characters, and is still used inside this file as
+// defense in depth — this function never transforms the value: it either
+// returns the input completely unchanged (when it already matches the safe
+// allowlist) or a fixed fallback with no relationship to the input at all.
+// That distinction matters for static taint analysis (e.g. CodeQL's Go
+// email-content-injection query): a value that passes through a string
+// transformation is still flagged as derived from untrusted input no matter
+// how strict the transformation is, whereas a value gated by a regex-match
+// guard that returns either the literal checked value or an unrelated
+// constant is the recognized sanitizing idiom.
+func validateEmailContentName(raw string) string {
+	if safeEmailNamePattern.MatchString(raw) {
+		return raw
+	}
+	return "there"
+}
+
 // EmailSender defines the interface for delivering outbound transactional emails.
 type EmailSender interface {
 	SendVerificationEmail(toEmail, toName, verificationLink string) error
