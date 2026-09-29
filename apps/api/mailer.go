@@ -119,7 +119,7 @@ func (r *ResendMailer) SendVerificationEmail(toEmail, toName, verificationLink s
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d1117; color: #c9d1d9; padding: 40px 20px;">
   <div style="max-width: 560px; margin: 0 auto; background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px;">
-    <h1 style="color: #58a6ff; font-size: 24px; margin-top: 0;">Welcome to Whiparc, %s!</h1>
+    <h1 style="color: #58a6ff; font-size: 24px; margin-top: 0;">Welcome to Whiparc!</h1>
     <p style="font-size: 15px; line-height: 1.6; color: #8b949e;">Please verify your email address to activate your account and start orchestrating your cloud infrastructure.</p>
     <div style="margin: 32px 0; text-align: center;">
       <a href="%s" style="display: inline-block; background-color: #238636; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 16px;">Verify Email Address</a>
@@ -132,7 +132,7 @@ func (r *ResendMailer) SendVerificationEmail(toEmail, toName, verificationLink s
 </body>
 </html>`, escapedLink, escapedLink)
 
-	textBody := fmt.Sprintf("Welcome to Whiparc, %s!\n\nPlease verify your email address by opening the following link:\n%s\n\nThis link expires in 24 hours.", cleanLink)
+	textBody := fmt.Sprintf("Welcome to Whiparc!\n\nPlease verify your email address by opening the following link:\n%s\n\nThis link expires in 24 hours.", cleanLink)
 
 	payload := map[string]interface{}{
 		"from":    r.from,
