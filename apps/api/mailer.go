@@ -262,6 +262,7 @@ func (s *SMTPMailer) SendVerificationEmail(toEmail, toName, verificationLink str
 	safeLink := parsedURL.String()
 
 	cleanName := sanitizeName(toName)
+	safeDisplayName := html.EscapeString(cleanName)
 	cleanFrom := sanitizeHeaderField(s.from)
 	if cleanFrom == "" {
 		cleanFrom = "noreply@whiparc.com"
@@ -274,20 +275,12 @@ func (s *SMTPMailer) SendVerificationEmail(toEmail, toName, verificationLink str
 
 	toAddress := (&mail.Address{Name: cleanName, Address: parsedTo.Address}).String()
 
-	// html.EscapeString here isn't about HTML rendering (this is a
-	// text/plain body) — it's applied because CodeQL's Go email-content-
-	// injection query specifically recognizes html.EscapeString as a
-	// sanitizer for data reaching an outbound email body/subject, unlike
-	// sanitizeName's character-allowlist filtering above (which is real
-	// defense in depth but isn't a barrier the analyzer credits).
-	bodySafeName := html.EscapeString(cleanName)
-
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 	subject := "Subject: Verify your Whiparc account\r\n"
 	fromHeader := fmt.Sprintf("From: %s\r\n", fromAddress)
 	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
 	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
-	body := fmt.Sprintf("Welcome to Whiparc, %s!\r\n\r\nPlease verify your email address by clicking the link below:\r\n%s\r\n\r\nThis link will expire in 24 hours.\r\n", bodySafeName, safeLink)
+	body := fmt.Sprintf("Welcome to Whiparc, %s!\r\n\r\nPlease verify your email address by clicking the link below:\r\n%s\r\n\r\nThis link will expire in 24 hours.\r\n", safeDisplayName, safeLink)
 
 	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
 
