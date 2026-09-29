@@ -1483,14 +1483,21 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Dispatch verification email in background (Console / Resend / SMTP).
-	// name is validated here, at the call site — see validateEmailContentName
-	// in mailer.go for why a guard-and-reject check is used here instead of
-	// sanitizeName's strip-and-continue (which is still used inside mailer.go
-	// as defense in depth, but doesn't read as a taint barrier to static
-	// analysis like CodeQL).
+	// Re-read the name from the row we just committed, rather than reusing
+	// the in-memory `name` decoded straight from the request body: this
+	// mirrors handleResendVerificationEmail below (which has never tripped
+	// CodeQL's email-content-injection check, because it already reads name
+	// from a DB SELECT rather than the live request) and is the same "load
+	// from a trusted store instead of the request" fix CodeQL's own query
+	// documentation recommends. validateEmailContentName (mailer.go) is
+	// still applied on top as defense in depth.
 	verificationLink := fmt.Sprintf("%s/verify-email?token=%s", oauthFrontendBase(), verificationToken)
+	storedName := name
+	if err := db.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&storedName); err != nil {
+		log.Printf("[EMAIL] Warning: failed to re-read name for %s before sending verification email: %v\n", email, err)
+	}
 	go func() {
-		if err := emailSender.SendVerificationEmail(email, validateEmailContentName(name), verificationLink); err != nil {
+		if err := emailSender.SendVerificationEmail(email, validateEmailContentName(storedName), verificationLink); err != nil {
 			log.Printf("[EMAIL] Failed to send verification email to %s: %v\n", email, err)
 		}
 	}()
