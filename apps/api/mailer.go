@@ -77,13 +77,12 @@ type EmailSender interface {
 type ConsoleMailer struct{}
 
 func (c *ConsoleMailer) SendVerificationEmail(toEmail, toName, verificationLink string) error {
-	cleanName := sanitizeName(toName)
 	cleanEmail := sanitizeHeaderField(toEmail)
 	cleanLink := sanitizeHeaderField(verificationLink)
 
 	divider := strings.Repeat("=", 70)
-	log.Printf("\n%s\n[EMAIL DISPATCH - LOCAL/DEV CONSOLE MODE]\nTo: %s <%s>\nSubject: Verify your Whiparc account\nAction Link: %s\nExpires: in 24 hours\n%s\n",
-		divider, cleanName, cleanEmail, cleanLink, divider)
+	log.Printf("\n%s\n[EMAIL DISPATCH - LOCAL/DEV CONSOLE MODE]\nTo: %s\nSubject: Verify your Whiparc account\nAction Link: %s\nExpires: in 24 hours\n%s\n",
+		divider, cleanEmail, cleanLink, divider)
 	return nil
 }
 
@@ -107,11 +106,9 @@ type ResendMailer struct {
 }
 
 func (r *ResendMailer) SendVerificationEmail(toEmail, toName, verificationLink string) error {
-	cleanName := sanitizeName(toName)
 	cleanEmail := sanitizeHeaderField(toEmail)
 	cleanLink := sanitizeHeaderField(verificationLink)
 
-	escapedName := html.EscapeString(cleanName)
 	escapedLink := html.EscapeString(cleanLink)
 
 	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
@@ -133,9 +130,9 @@ func (r *ResendMailer) SendVerificationEmail(toEmail, toName, verificationLink s
     <p style="font-size: 12px; color: #484f58; margin: 0;">If you did not sign up for Whiparc, please disregard this email. This link will expire in 24 hours.</p>
   </div>
 </body>
-</html>`, escapedName, escapedLink, escapedLink)
+</html>`, escapedLink, escapedLink)
 
-	textBody := fmt.Sprintf("Welcome to Whiparc, %s!\n\nPlease verify your email address by opening the following link:\n%s\n\nThis link expires in 24 hours.", escapedName, escapedLink)
+	textBody := fmt.Sprintf("Welcome to Whiparc, %s!\n\nPlease verify your email address by opening the following link:\n%s\n\nThis link expires in 24 hours.", cleanLink)
 
 	payload := map[string]interface{}{
 		"from":    r.from,
@@ -273,7 +270,7 @@ func (s *SMTPMailer) SendVerificationEmail(toEmail, toName, verificationLink str
 	fromHeader := fmt.Sprintf("From: %s\r\n", trustedFromHeader)
 	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
 	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
-	body := fmt.Sprintf("Welcome to Whiparc, %s!\r\n\r\nPlease verify your email address by clicking the link below:\r\n%s\r\n\r\nThis link will expire in 24 hours.\r\n", cleanName, safeLink)
+	body := fmt.Sprintf("Welcome to Whiparc!\r\n\r\nPlease verify your email address by clicking the link below:\r\n%s\r\n\r\nThis link will expire in 24 hours.\r\n", safeLink)
 
 	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
 
