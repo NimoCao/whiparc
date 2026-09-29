@@ -258,7 +258,7 @@ func (s *SMTPMailer) SendVerificationEmail(toEmail, toName, verificationLink str
 	}
 	safeLink := parsedURL.String()
 
-	cleanName := sanitizeName(toName)
+	cleanName := validateEmailContentName(toName)
 	// Use a hardcoded trusted email address instead of s.from
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
@@ -294,8 +294,8 @@ func (s *SMTPMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLink 
 	}
 	safeLink := parsedURL.String()
 
-	cleanTeam := sanitizeName(teamName)
-	cleanInviter := sanitizeName(inviterName)
+	cleanTeam := validateEmailContentName(teamName)
+	cleanInviter := validateEmailContentName(inviterName)
 	cleanFrom := sanitizeHeaderField(s.from)
 	if cleanFrom == "" {
 		cleanFrom = "noreply@whiparc.com"
