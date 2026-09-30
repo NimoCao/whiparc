@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../store/useAuthStore';
 import ProfileMenu from '../components/ProfileMenu';
+import { ProjectSettingsModal } from '../components/ProjectSettingsModal';
+import { ImportTerraformModal } from '../components/ImportTerraformModal';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
@@ -61,9 +64,23 @@ const FILTER_LABELS: { id: RunStatusFilter; label: string }[] = [
   { id: 'none', label: 'Draft' },
 ];
 
+const projectMenuItemStyle: CSSProperties = {
+  width: '100%',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '7px 9px',
+  fontSize: 12.5,
+  color: 'var(--ink)',
+  background: 'none',
+  border: 0,
+  cursor: 'pointer',
+};
+
 export default function ProjectsPageV2() {
   const { user, token, hasHydrated } = useAuthStore();
   const isLoggedIn = hasHydrated && !!user;
+  const router = useRouter();
 
   const [theme, setTheme] = useState<Theme>('dark');
   const [projects, setProjects] = useState<Project[]>([]);
@@ -72,57 +89,104 @@ export default function ProjectsPageV2() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<RunStatusFilter>('all');
-  const [showImportNote, setShowImportNote] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [settingsProject, setSettingsProject] = useState<Project | null>(null);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'danger'>('general');
+  const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
+
+  const loadProjects = useCallback(async () => {
+    if (!token) return;
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/projects${showArchived ? '?archived=1' : ''}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+      const data: Project[] = await res.json();
+      setProjects(data);
+
+      // Real, per-project run history — the endpoint already exists and
+      // is already used by the workspace; this is the first page to
+      // fan it out across every project to compute a real "latest run"
+      // status per card instead of a fabricated environment tag.
+      const summaries: Record<string, RunSummary> = {};
+      await Promise.all(
+        data.map(async (p) => {
+          try {
+            const runsRes = await fetch(`${API_URL}/api/projects/${p.id}/runs`, { headers: { Authorization: `Bearer ${token}` } });
+            if (!runsRes.ok) return;
+            const runs: { status: string; updatedAt: string }[] = await runsRes.json();
+            if (runs.length === 0) {
+              summaries[p.id] = { state: 'none', when: '' };
+              return;
+            }
+            const latest = runs[0];
+            const state = latest.status === 'SUCCESS' ? 'ok' : latest.status === 'FAILED' ? 'failed' : 'none';
+            summaries[p.id] = { state, when: timeAgo(latest.updatedAt) };
+          } catch {
+            // leave this project's summary unset — its card shows no dot rather than a wrong one
+          }
+        })
+      );
+      setRunSummaries(summaries);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to load projects.';
+      setLoadError(msg.includes('fetch') ? 'Cannot connect to the backend server. Please try again shortly.' : msg);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [token, showArchived]);
 
   useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    (async () => {
-      setIsLoading(true);
-      try {
-        const res = await fetch(`${API_URL}/api/projects`, { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
-        const data: Project[] = await res.json();
-        if (cancelled) return;
-        setProjects(data);
+    // Fetching on mount/dependency change is the intended synchronization with the projects API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadProjects();
+  }, [loadProjects]);
 
-        // Real, per-project run history — the endpoint already exists and
-        // is already used by the workspace; this is the first page to
-        // fan it out across every project to compute a real "latest run"
-        // status per card instead of a fabricated environment tag.
-        const summaries: Record<string, RunSummary> = {};
-        await Promise.all(
-          data.map(async (p) => {
-            try {
-              const runsRes = await fetch(`${API_URL}/api/projects/${p.id}/runs`, { headers: { Authorization: `Bearer ${token}` } });
-              if (!runsRes.ok) return;
-              const runs: { status: string; updatedAt: string }[] = await runsRes.json();
-              if (runs.length === 0) {
-                summaries[p.id] = { state: 'none', when: '' };
-                return;
-              }
-              const latest = runs[0];
-              const state = latest.status === 'SUCCESS' ? 'ok' : latest.status === 'FAILED' ? 'failed' : 'none';
-              summaries[p.id] = { state, when: timeAgo(latest.updatedAt) };
-            } catch {
-              // leave this project's summary unset — its card shows no dot rather than a wrong one
-            }
-          })
-        );
-        if (!cancelled) setRunSummaries(summaries);
-      } catch (err) {
-        if (!cancelled) {
-          const msg = err instanceof Error ? err.message : 'Failed to load projects.';
-          setLoadError(msg.includes('fetch') ? 'Cannot connect to the backend server. Please try again shortly.' : msg);
-        }
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
+  const handleDuplicate = async (projectId: string) => {
+    if (!token) return;
+    setOpenMenuId(null);
+    setBusyProjectId(projectId);
+    try {
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error((await res.text()) || 'Failed to duplicate project');
+      await loadProjects();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to duplicate project');
+    } finally {
+      setBusyProjectId(null);
+    }
+  };
+
+  const handleArchiveToggle = async (projectId: string, archive: boolean) => {
+    if (!token) return;
+    if (archive && !confirm('Archive this project? It will be hidden from your projects list until you unarchive it.')) return;
+    setOpenMenuId(null);
+    setBusyProjectId(projectId);
+    try {
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/${archive ? 'archive' : 'unarchive'}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.text()) || `Failed to ${archive ? 'archive' : 'unarchive'} project`);
+      await loadProjects();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setBusyProjectId(null);
+    }
+  };
+
+  const openSettings = (p: Project, initialTab: 'general' | 'danger') => {
+    setOpenMenuId(null);
+    setSettingsInitialTab(initialTab);
+    setSettingsProject(p);
+  };
 
   const visibleProjects = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -216,7 +280,7 @@ export default function ProjectsPageV2() {
             </button>
             <button
               type="button"
-              onClick={() => setShowImportNote(true)}
+              onClick={() => setShowImportModal(true)}
               className="wp-projects-navlink"
               style={{ height: 32, padding: '0 12px', display: 'flex', alignItems: 'center', gap: 7, fontSize: 13.5, border: '1px solid var(--line)', color: 'var(--ink)', background: 'transparent', cursor: 'pointer' }}
             >
@@ -239,11 +303,6 @@ export default function ProjectsPageV2() {
           <div>
             <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 'clamp(26px,3vw,34px)', lineHeight: 1.1, color: 'var(--ink)' }}>Projects</h1>
             <p style={{ margin: '5px 0 0', fontSize: 14.5, color: 'var(--ink2)' }}>Every graph your team owns.</p>
-            {showImportNote && (
-              <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--amber)', background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid var(--amber)', padding: '6px 10px', width: 'fit-content' }}>
-                Importing existing Terraform is launching in a future phase.
-              </p>
-            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -270,6 +329,28 @@ export default function ProjectsPageV2() {
                 </button>
               );
             })}
+            <button
+              type="button"
+              onClick={() => setShowArchived((v) => !v)}
+              style={{
+                height: 30,
+                padding: '0 13px',
+                marginLeft: 'auto',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontFamily: 'var(--font-display)',
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: 'pointer',
+                border: `1px solid ${showArchived ? 'var(--accent)' : 'var(--line)'}`,
+                background: showArchived ? 'var(--accent)' : 'transparent',
+                color: showArchived ? 'var(--on-accent)' : 'var(--ink2)',
+              }}
+            >
+              <Icon icon="lucide:archive" width={13} />
+              {showArchived ? 'Archived' : 'Show archived'}
+            </button>
           </div>
 
           {isLoading ? (
@@ -286,17 +367,35 @@ export default function ProjectsPageV2() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 14 }}>
               {visibleProjects.map((p) => {
                 const summary = runSummaries[p.id];
+                const isAdmin = p.user_role === 'ADMIN';
+                const isMenuOpen = openMenuId === p.id;
+                const isBusy = busyProjectId === p.id;
                 return (
                   <Link
                     key={p.id}
                     href={`/workspace?project=${p.id}`}
                     className="wp-blueprint wp-projects-card"
-                    style={{ position: 'relative', display: 'block', background: 'var(--panel)', padding: 16, color: 'var(--ink)' }}
+                    style={{ position: 'relative', display: 'block', background: 'var(--panel)', padding: 16, color: 'var(--ink)', opacity: isBusy ? 0.6 : 1 }}
                   >
                     <BlueprintCorners />
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                       <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 18 }}>{p.name}</p>
-                      <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', padding: '2px 7px', color: 'var(--ink2)', background: 'var(--chip)' }}>{p.visibility.toLowerCase()}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', padding: '2px 7px', color: 'var(--ink2)', background: 'var(--chip)' }}>{p.visibility.toLowerCase()}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setOpenMenuId(isMenuOpen ? null : p.id);
+                          }}
+                          disabled={isBusy}
+                          className="wp-projects-iconbtn"
+                          style={{ width: 22, height: 22, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink2)', cursor: 'pointer' }}
+                        >
+                          <Icon icon="lucide:more-vertical" width={12} />
+                        </button>
+                      </div>
                     </div>
                     <p style={{ margin: '8px 0 0', fontFamily: 'var(--font-mono-marketing)', fontSize: 11, color: 'var(--ink2)' }}>{p.description || 'No description'}</p>
                     <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, fontSize: 12.5, color: 'var(--ink2)' }}>
@@ -306,6 +405,81 @@ export default function ProjectsPageV2() {
                       </span>
                       <span>{p.user_role}</span>
                     </div>
+
+                    {isMenuOpen && (
+                      <>
+                        <div
+                          style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setOpenMenuId(null);
+                          }}
+                        />
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ position: 'absolute', right: 12, top: 44, width: 176, background: 'var(--panel)', border: '1px solid var(--line)', zIndex: 50, padding: 4 }}
+                        >
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                openSettings(p, 'general');
+                              }}
+                              className="wp-ws-navlink"
+                              style={projectMenuItemStyle}
+                            >
+                              <Icon icon="lucide:pencil" width={12} style={{ color: 'var(--ink3)' }} />
+                              Rename / Settings
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleDuplicate(p.id);
+                            }}
+                            className="wp-ws-navlink"
+                            style={projectMenuItemStyle}
+                          >
+                            <Icon icon="lucide:copy" width={12} style={{ color: 'var(--ink3)' }} />
+                            Duplicate
+                          </button>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleArchiveToggle(p.id, !showArchived);
+                              }}
+                              className="wp-ws-navlink"
+                              style={projectMenuItemStyle}
+                            >
+                              <Icon icon={showArchived ? 'lucide:archive-restore' : 'lucide:archive'} width={12} style={{ color: 'var(--ink3)' }} />
+                              {showArchived ? 'Unarchive' : 'Archive'}
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <>
+                              <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  openSettings(p, 'danger');
+                                }}
+                                className="wp-ws-navlink"
+                                style={{ ...projectMenuItemStyle, color: 'var(--danger)' }}
+                              >
+                                <Icon icon="lucide:trash-2" width={12} />
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </Link>
                 );
               })}
@@ -321,6 +495,33 @@ export default function ProjectsPageV2() {
           )}
         </div>
       </main>
+
+      {settingsProject && token && (
+        <ProjectSettingsModal
+          isOpen
+          initialTab={settingsInitialTab}
+          onClose={() => {
+            setSettingsProject(null);
+            loadProjects();
+          }}
+          projectDetails={settingsProject}
+          onUpdateProjectDetails={(updated) => setSettingsProject(updated)}
+          projectId={settingsProject.id}
+        />
+      )}
+
+      {showImportModal && token && (
+        <ImportTerraformModal
+          isOpen
+          token={token}
+          editableProjects={projects.filter((p) => p.user_role === 'ADMIN' || p.user_role === 'EDITOR')}
+          onClose={() => setShowImportModal(false)}
+          onImported={(projectId) => {
+            setShowImportModal(false);
+            router.push(`/workspace?project=${projectId}`);
+          }}
+        />
+      )}
     </div>
   );
 }
