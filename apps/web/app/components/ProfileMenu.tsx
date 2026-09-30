@@ -139,6 +139,10 @@ export default function ProfileMenu({ variant = 'default', blueprint = false }: 
                 <Icon icon="lucide:layout-dashboard" width={12} style={{ color: 'var(--ink3)' }} />
                 Dashboard
               </Link>
+              <Link href="/account" onClick={() => setOpen(false)} className="wp-ws-navlink" style={blueprintMenuItemStyle}>
+                <Icon icon="lucide:shield-check" width={12} style={{ color: 'var(--ink3)' }} />
+                Account
+              </Link>
 
               <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
 
@@ -188,6 +192,14 @@ export default function ProfileMenu({ variant = 'default', blueprint = false }: 
             >
               <Icon icon="lucide:layout-dashboard" className="text-base text-muted-foreground" />
               Dashboard
+            </Link>
+            <Link
+              href="/account"
+              onClick={() => setOpen(false)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg text-foreground hover:bg-muted transition-colors"
+            >
+              <Icon icon="lucide:shield-check" className="text-base text-muted-foreground" />
+              Account
             </Link>
           </div>
           <div className="p-1 border-t border-border">

@@ -7,7 +7,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import ProfileMenu from '../components/ProfileMenu';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
-import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon } from '../dashboard/NavIcons';
+import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, ShieldIcon, BookIcon } from '../dashboard/NavIcons';
 import { BrandLogo } from '../components/brand/BrandLogo';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import '../components/ui/blueprint.css';
@@ -22,6 +22,7 @@ const NAV_ITEMS: { key: string; label: string; href: string; icon: React.ReactNo
   { key: 'runs', label: 'Runs', href: '/runs', icon: <ActivityIcon /> },
   { key: 'credentials', label: 'Credentials', href: '/credentials', icon: <LockIcon /> },
   { key: 'team', label: 'Team', href: '/team', icon: <UsersIcon /> },
+  { key: 'account', label: 'Account', href: '/account', icon: <ShieldIcon /> },
   { key: 'docs', label: 'Docs', href: '/docs', icon: <BookIcon /> },
 ];
 

@@ -173,6 +173,40 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     8,
+		description: "add_password_resets_table",
+		up: func(tx sqlExecer) error {
+			// token_hash, never the raw token (08.5 item G3's explicit spec) —
+			// same reasoning as any credential secret in this app: a DB read
+			// (backup, replica, compromised query) must not hand out something
+			// directly usable to reset an account's password. used_at is
+			// nullable rather than a DELETE-on-use so there's an audit trail;
+			// single-use is enforced by checking used_at IS NULL at lookup time.
+			ddl := `CREATE TABLE password_resets (
+				id TEXT PRIMARY KEY,
+				user_id TEXT NOT NULL,
+				token_hash TEXT NOT NULL,
+				expires_at DATETIME NOT NULL,
+				used_at DATETIME,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+			)`
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to create password_resets: %w", err)
+			}
+			if _, err := tx.Exec("CREATE INDEX idx_password_resets_token_hash ON password_resets(token_hash)"); err != nil {
+				return fmt.Errorf("failed to create password_resets token_hash index: %w", err)
+			}
+			if _, err := tx.Exec("CREATE INDEX idx_password_resets_user_id ON password_resets(user_id)"); err != nil {
+				return fmt.Errorf("failed to create password_resets user_id index: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

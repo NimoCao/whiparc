@@ -71,6 +71,11 @@ func validateEmailContentName(raw string) string {
 type EmailSender interface {
 	SendVerificationEmail(toEmail, toName, verificationLink string) error
 	SendInviteEmail(toEmail, teamName, inviterName, acceptLink string) error
+	// SendPasswordResetEmail's copy is chosen by the caller (hasPassword) since
+	// the same token flow serves both "reset my password" and "set my first
+	// password" (an OAuth-only account with no password_hash yet) — see
+	// product-memory 08.5 item G3.
+	SendPasswordResetEmail(toEmail, toName, resetLink string, hasPassword bool) error
 }
 
 // ConsoleMailer logs transactional emails directly to the server logs for local development.
@@ -95,6 +100,20 @@ func (c *ConsoleMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLi
 	divider := strings.Repeat("=", 70)
 	log.Printf("\n%s\n[EMAIL DISPATCH - LOCAL/DEV CONSOLE MODE]\nTo: %s\nSubject: %s invited you to join %s on Whiparc\nAction Link: %s\nExpires: in 7 days\n%s\n",
 		divider, cleanEmail, cleanInviter, cleanTeam, cleanLink, divider)
+	return nil
+}
+
+func (c *ConsoleMailer) SendPasswordResetEmail(toEmail, toName, resetLink string, hasPassword bool) error {
+	cleanEmail := sanitizeHeaderField(toEmail)
+	cleanLink := sanitizeHeaderField(resetLink)
+	subject := "Set a password for your Whiparc account"
+	if hasPassword {
+		subject = "Reset your Whiparc password"
+	}
+
+	divider := strings.Repeat("=", 70)
+	log.Printf("\n%s\n[EMAIL DISPATCH - LOCAL/DEV CONSOLE MODE]\nTo: %s\nSubject: %s\nAction Link: %s\nExpires: in 1 hour\n%s\n",
+		divider, cleanEmail, subject, cleanLink, divider)
 	return nil
 }
 
@@ -235,6 +254,82 @@ func (r *ResendMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLin
 	return nil
 }
 
+func (r *ResendMailer) SendPasswordResetEmail(toEmail, toName, resetLink string, hasPassword bool) error {
+	cleanEmail := sanitizeHeaderField(toEmail)
+	cleanName := validateEmailContentName(toName)
+	cleanLink := sanitizeHeaderField(resetLink)
+
+	escapedName := html.EscapeString(cleanName)
+	escapedLink := html.EscapeString(cleanLink)
+
+	heading := "Reset your password"
+	intro := "We received a request to reset the password for your Whiparc account."
+	button := "Reset Password"
+	subject := "Reset your Whiparc password"
+	if !hasPassword {
+		heading = "Set a password"
+		intro = "Your Whiparc account currently signs in via Google or GitHub only. Use the link below to also set a password."
+		button = "Set Password"
+		subject = "Set a password for your Whiparc account"
+	}
+
+	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>%s</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d1117; color: #c9d1d9; padding: 40px 20px;">
+  <div style="max-width: 560px; margin: 0 auto; background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px;">
+    <h1 style="color: #58a6ff; font-size: 24px; margin-top: 0;">%s</h1>
+    <p style="font-size: 15px; line-height: 1.6; color: #8b949e;">Hi %s, %s</p>
+    <div style="margin: 32px 0; text-align: center;">
+      <a href="%s" style="display: inline-block; background-color: #238636; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 16px;">%s</a>
+    </div>
+    <p style="font-size: 13px; color: #8b949e;">Or copy and paste this link into your browser:</p>
+    <p style="font-size: 12px; color: #58a6ff; word-break: break-all;">%s</p>
+    <hr style="border: 0; border-top: 1px solid #30363d; margin: 32px 0 16px 0;" />
+    <p style="font-size: 12px; color: #484f58; margin: 0;">If you did not request this, you can safely ignore this email — your password will not change. This link will expire in 1 hour.</p>
+  </div>
+</body>
+</html>`, heading, heading, escapedName, intro, escapedLink, button, escapedLink)
+
+	textBody := fmt.Sprintf("%s\n\nHi %s, %s\n\nOpen the following link to continue:\n%s\n\nIf you did not request this, you can safely ignore this email. This link expires in 1 hour.", heading, cleanName, intro, cleanLink)
+
+	payload := map[string]interface{}{
+		"from":    r.from,
+		"to":      []string{cleanEmail},
+		"subject": subject,
+		"html":    htmlBody,
+		"text":    textBody,
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", "https://api.resend.com/emails", bytes.NewReader(payloadJSON))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+r.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("resend api request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("resend returned status code %d", resp.StatusCode)
+	}
+
+	log.Printf("[EMAIL] Password reset email sent to %s via Resend\n", cleanEmail)
+	return nil
+}
+
 // SMTPMailer sends emails via standard SMTP server.
 type SMTPMailer struct {
 	host string
@@ -312,6 +407,48 @@ func (s *SMTPMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLink 
 	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
 	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
 	body := fmt.Sprintf("%s invited you to join %s on Whiparc.\r\n\r\nOpen the following link to accept:\r\n%s\r\n\r\nThis link will expire in 7 days.\r\n", cleanInviter, cleanTeam, safeLink)
+
+	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
+
+	var auth smtp.Auth
+	if s.user != "" {
+		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
+	}
+
+	return s.sendMail(addr, auth, trustedFromAddress, []string{parsedTo.Address}, msg)
+}
+
+func (s *SMTPMailer) SendPasswordResetEmail(toEmail, toName, resetLink string, hasPassword bool) error {
+	parsedTo, err := mail.ParseAddress(toEmail)
+	if err != nil {
+		return fmt.Errorf("invalid recipient address: %w", err)
+	}
+
+	parsedURL, err := url.ParseRequestURI(resetLink)
+	if err != nil {
+		return fmt.Errorf("invalid reset link: %w", err)
+	}
+	safeLink := parsedURL.String()
+
+	cleanName := validateEmailContentName(toName)
+	const trustedFromAddress = "noreply@whiparc.com"
+	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
+
+	toAddress := (&mail.Address{Name: cleanName, Address: parsedTo.Address}).String()
+
+	subjectLine := "Reset your Whiparc password"
+	intro := "We received a request to reset your Whiparc account password."
+	if !hasPassword {
+		subjectLine = "Set a password for your Whiparc account"
+		intro = "Your Whiparc account currently signs in via Google or GitHub only. Use the link below to also set a password."
+	}
+
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	subject := fmt.Sprintf("Subject: %s\r\n", subjectLine)
+	fromHeader := fmt.Sprintf("From: %s\r\n", trustedFromHeader)
+	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
+	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
+	body := fmt.Sprintf("%s\r\n\r\nOpen the following link to continue:\r\n%s\r\n\r\nIf you did not request this, you can safely ignore this email — your password will not change. This link will expire in 1 hour.\r\n", intro, safeLink)
 
 	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
 

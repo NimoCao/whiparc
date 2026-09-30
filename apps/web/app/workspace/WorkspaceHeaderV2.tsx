@@ -38,6 +38,7 @@ export interface WorkspaceHeaderV2Props {
   isSyncConnected?: boolean;
   saveStatus?: 'saved' | 'saving' | 'error' | 'readonly';
   onOpenSettings?: () => void;
+  onOpenHistory?: () => void;
   agentStatus?: string | null;
   migrationStatus?: { gated: boolean; has_active_agent: boolean; grace_period_end: string } | null;
 }
@@ -94,6 +95,7 @@ export function WorkspaceHeaderV2({
   isSyncConnected = false,
   saveStatus = 'saved',
   onOpenSettings,
+  onOpenHistory,
   agentStatus = null,
   migrationStatus = null,
 }: WorkspaceHeaderV2Props) {
@@ -127,6 +129,11 @@ export function WorkspaceHeaderV2({
       {onOpenSettings && (
         <button type="button" onClick={onOpenSettings} className="wp-ws-iconbtn" title="Project settings" style={{ background: 'none', border: 0, color: 'var(--ink2)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
           <Icon icon="lucide:settings" width={13} />
+        </button>
+      )}
+      {onOpenHistory && (
+        <button type="button" onClick={onOpenHistory} className="wp-ws-iconbtn" title="Deploy history" style={{ background: 'none', border: 0, color: 'var(--ink2)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+          <Icon icon="lucide:history" width={13} />
         </button>
       )}
 
