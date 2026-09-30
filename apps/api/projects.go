@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -567,9 +568,10 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	plan := user.Plan
 	emailVerified := user.EmailVerified
 	var onboardingDismissedAt sql.NullTime
+	var avatarURL sql.NullString
 
-	err := db.QueryRow("SELECT email, name, plan, email_verified, onboarding_dismissed_at FROM users WHERE id = ?", user.ID).
-		Scan(&email, &name, &plan, &emailVerified, &onboardingDismissedAt)
+	err := db.QueryRow("SELECT email, name, plan, email_verified, onboarding_dismissed_at, avatar_url FROM users WHERE id = ?", user.ID).
+		Scan(&email, &name, &plan, &emailVerified, &onboardingDismissedAt, &avatarURL)
 	if err != nil && err != sql.ErrNoRows {
 		log.Printf("[AUTH] Warning: failed to query live user for me endpoint: %v\n", err)
 	}
@@ -583,6 +585,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		"plan":                 plan,
 		"email_verified":       emailVerified,
 		"onboarding_dismissed": onboardingDismissed,
+		"avatar_url":           avatarURL.String,
 		"user": map[string]interface{}{
 			"id":                   user.ID,
 			"email":                email,
@@ -590,6 +593,111 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 			"plan":                 plan,
 			"email_verified":       emailVerified,
 			"onboarding_dismissed": onboardingDismissed,
+			"avatar_url":           avatarURL.String,
+		},
+	})
+}
+
+// PATCH /api/auth/profile — updates the caller's own display name and/or
+// avatar URL (product-memory 08.5 item G2 follow-up). Fields are optional
+// and independently updatable: omitting `avatar_url` entirely leaves it
+// untouched, while an explicit empty string clears it back to "no avatar
+// set" — the two have to be distinguishable, which is why this decodes into
+// pointers rather than plain strings.
+//
+// Scoped to a single free-text "name" field, not separate first/last name
+// columns — every other place identity is modeled in this app (the users
+// table, JWT claims, activity actor names, team rosters, mailer
+// personalization) already treats `name` as one display string, and
+// splitting it would mean migrating all of those together for a UX
+// convenience that free text already covers.
+//
+// Avatar is a pasted image URL, not a file upload — this app has no
+// object-storage integration for user content today (R2 is only used for
+// CLI binary distribution), and standing one up is a materially bigger task
+// than this endpoint. Revisit if real upload becomes worth it later.
+func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	user, ok := GetUserFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var payload struct {
+		Name      *string `json:"name"`
+		AvatarURL *string `json:"avatar_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if payload.Name != nil {
+		trimmed := strings.TrimSpace(*payload.Name)
+		if trimmed == "" {
+			http.Error(w, "Name cannot be empty", http.StatusBadRequest)
+			return
+		}
+		if len(trimmed) > 100 {
+			http.Error(w, "Name is too long (100 characters max)", http.StatusBadRequest)
+			return
+		}
+		payload.Name = &trimmed
+	}
+
+	if payload.AvatarURL != nil {
+		trimmed := strings.TrimSpace(*payload.AvatarURL)
+		if trimmed != "" {
+			parsed, err := url.ParseRequestURI(trimmed)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+				http.Error(w, "Avatar URL must be a valid http:// or https:// link", http.StatusBadRequest)
+				return
+			}
+		}
+		payload.AvatarURL = &trimmed
+	}
+
+	if payload.Name != nil {
+		if _, err := db.Exec("UPDATE users SET name = ? WHERE id = ?", *payload.Name, user.ID); err != nil {
+			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if payload.AvatarURL != nil {
+		if _, err := db.Exec("UPDATE users SET avatar_url = ? WHERE id = ?", nullIfEmpty(*payload.AvatarURL), user.ID); err != nil {
+			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	var email, name, plan string
+	var emailVerified bool
+	var avatarURL sql.NullString
+	if err := db.QueryRow("SELECT email, name, plan, email_verified, avatar_url FROM users WHERE id = ?", user.ID).
+		Scan(&email, &name, &plan, &emailVerified, &avatarURL); err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// name rides in the JWT (TokenClaims.Name) — re-issue so a name change
+	// is reflected immediately client-side without waiting on a separate
+	// fetchMe() round trip, same reasoning as handleResetPassword's token.
+	token, err := GenerateToken(user.ID, email, name, plan, emailVerified)
+	if err != nil {
+		http.Error(w, "Failed to sign token: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"token": token,
+		"user": map[string]interface{}{
+			"id":             user.ID,
+			"email":          email,
+			"name":           name,
+			"plan":           plan,
+			"email_verified": emailVerified,
+			"avatar_url":     avatarURL.String,
 		},
 	})
 }

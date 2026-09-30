@@ -8,6 +8,9 @@ interface User {
   plan: string;
   email_verified: boolean;
   onboarding_dismissed: boolean;
+  // Not carried in the JWT (unlike name) — starts empty until the first
+  // fetchMe() refresh, same reasoning as onboarding_dismissed below.
+  avatar_url: string;
 }
 
 interface AuthState {
@@ -32,6 +35,7 @@ interface AuthState {
   logout: () => void;
   clearError: () => void;
   upgradePlan: (newPlan: string) => Promise<boolean>;
+  updateProfile: (payload: { name?: string; avatar_url?: string }) => Promise<{ success: boolean; error?: string }>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -67,6 +71,7 @@ function decodeTokenClaims(token: string): User | null {
       email_verified: claims.email_verified ?? false,
       // Not carried in the JWT — refreshed by the fetchMe() call setSessionFromToken triggers below.
       onboarding_dismissed: false,
+      avatar_url: '',
     };
   } catch {
     return null;
@@ -230,6 +235,7 @@ export const useAuthStore = create<AuthState>()(
             plan: data.plan || data.user?.plan || 'FREE',
             email_verified: Boolean(data.email_verified ?? data.user?.email_verified),
             onboarding_dismissed: Boolean(data.onboarding_dismissed ?? data.user?.onboarding_dismissed),
+            avatar_url: data.avatar_url || data.user?.avatar_url || '',
           };
           set({ user: fetchedUser });
           return fetchedUser;
@@ -294,6 +300,31 @@ export const useAuthStore = create<AuthState>()(
         } catch (err: unknown) {
           console.error("Upgrade error", err);
           return false;
+        }
+      },
+
+      updateProfile: async (payload) => {
+        const token = get().token;
+        if (!token) return { success: false, error: 'Please sign in first.' };
+        try {
+          const res = await fetch(`${API_URL}/api/auth/profile`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || 'Failed to update profile');
+          }
+          const data = await res.json();
+          set({ token: data.token, user: data.user });
+          return { success: true };
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Failed to update profile';
+          return { success: false, error: msg };
         }
       },
     }),

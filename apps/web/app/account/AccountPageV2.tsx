@@ -51,9 +51,45 @@ function AccountContent() {
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const [profileName, setProfileName] = useState('');
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState('');
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+
   useEffect(() => {
     if (hasHydrated && !user) router.replace('/login?redirect=/account');
   }, [hasHydrated, user, router]);
+
+  // Re-syncs the editable draft whenever the underlying user record changes
+  // (initial load, a fetchMe() refresh filling in avatar_url after mount, or
+  // a successful save) — this only ever fires on those real transitions,
+  // never on a timer, so it doesn't fight with the user mid-edit.
+  useEffect(() => {
+    if (!user) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing the edit draft to a real user-record change (load, refresh, save), not a timer
+    setProfileName(user.name);
+    setProfileAvatarUrl(user.avatar_url);
+    setAvatarLoadFailed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.name, user?.avatar_url]);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedName = profileName.trim();
+    if (!trimmedName) {
+      setActionError('Name cannot be empty.');
+      return;
+    }
+    setSavingProfile(true);
+    setActionError(null);
+    const result = await useAuthStore.getState().updateProfile({ name: trimmedName, avatar_url: profileAvatarUrl.trim() });
+    setSavingProfile(false);
+    if (result.success) {
+      setNotice({ kind: 'success', text: 'Profile updated.' });
+    } else {
+      setActionError(result.error || 'Failed to update profile.');
+    }
+  };
 
   const loadIdentities = async () => {
     if (!token) return;
@@ -224,7 +260,76 @@ function AccountContent() {
         <div className="wp-blueprint" style={cardStyle}>
           <BlueprintCorners />
           <h2 style={h2Style}>Profile</h2>
-          <p style={bodyStyle}>{user.name} &middot; {user.email}</p>
+          <p style={bodyStyle}>{user.email} — your sign-in email can&apos;t be changed here.</p>
+
+          <form onSubmit={handleSaveProfile} style={{ marginTop: 16, display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 18,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                fontFamily: 'var(--font-display, inherit)',
+                background: 'var(--accent)',
+                color: 'var(--on-accent)',
+                overflow: 'hidden',
+              }}
+            >
+              {profileAvatarUrl && !avatarLoadFailed ? (
+                // eslint-disable-next-line @next/next/no-img-element -- an arbitrary externally-pasted URL, not an optimizable local/remote asset Next's Image loader is configured for
+                <img
+                  src={profileAvatarUrl}
+                  alt=""
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={() => setAvatarLoadFailed(true)}
+                />
+              ) : (
+                (profileName || user.name).slice(0, 2)
+              )}
+            </div>
+
+            <div style={{ flex: 1, display: 'grid', gap: 12 }}>
+              <label style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink2)' }}>Name</span>
+                <input
+                  type="text"
+                  required
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  placeholder="Priya Raghavan"
+                  style={{ height: 36, padding: '0 10px', border: '1px solid var(--line)', background: 'var(--elevated)', color: 'var(--ink)', fontSize: 13.5, fontFamily: 'var(--font-body-marketing), sans-serif', outline: 'none' }}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink2)' }}>Avatar URL</span>
+                <input
+                  type="url"
+                  value={profileAvatarUrl}
+                  onChange={(e) => {
+                    setProfileAvatarUrl(e.target.value);
+                    setAvatarLoadFailed(false);
+                  }}
+                  placeholder="https://example.com/photo.jpg"
+                  style={{ height: 36, padding: '0 10px', border: '1px solid var(--line)', background: 'var(--elevated)', color: 'var(--ink)', fontSize: 13.5, fontFamily: 'var(--font-body-marketing), sans-serif', outline: 'none' }}
+                />
+              </label>
+
+              <button
+                type="submit"
+                disabled={savingProfile}
+                className="wp-blueprint"
+                style={{ position: 'relative', height: 34, padding: '0 14px', fontSize: 12.5, fontWeight: 500, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: savingProfile ? 'default' : 'pointer', opacity: savingProfile ? 0.7 : 1, justifySelf: 'start' }}
+              >
+                <BlueprintCorners />
+                {savingProfile ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+          </form>
         </div>
 
         <div className="wp-blueprint" style={cardStyle}>

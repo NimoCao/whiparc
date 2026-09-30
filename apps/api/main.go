@@ -308,6 +308,7 @@ func main() {
 	mux.Handle("POST /api/auth/resend-verification", AuthMiddleware(http.HandlerFunc(handleResendVerification)))
 	mux.Handle("POST /api/auth/upgrade", AuthMiddleware(http.HandlerFunc(handleUpgradePlan)))
 	mux.Handle("GET /api/auth/me", AuthMiddleware(http.HandlerFunc(handleMe)))
+	mux.Handle("PATCH /api/auth/profile", AuthMiddleware(http.HandlerFunc(handleUpdateProfile)))
 	mux.Handle("PATCH /api/auth/onboarding", AuthMiddleware(http.HandlerFunc(handleDismissOnboarding)))
 	mux.HandleFunc("POST /api/auth/forgot", enableCORS(handleForgotPassword))
 	// Deliberately not GET /api/auth/reset/{token} — that collides with

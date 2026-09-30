@@ -207,6 +207,20 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     9,
+		description: "add_avatar_url_to_users",
+		up: func(tx sqlExecer) error {
+			// Nullable, no default: NULL means "no avatar set" (every existing
+			// row), every UI spot that renders it falls back to initials. Plain
+			// TEXT needs no DATETIME/pgSchema dance (that's only for date/time
+			// columns — see migration 2's verification_expires_at comment).
+			if _, err := tx.Exec("ALTER TABLE users ADD COLUMN avatar_url TEXT"); err != nil {
+				return fmt.Errorf("failed to add avatar_url: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet
