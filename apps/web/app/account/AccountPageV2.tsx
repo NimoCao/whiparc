@@ -15,6 +15,18 @@ import '../components/ui/blueprint.css';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
+function sanitizeAvatarUrl(raw: string): string {
+  const value = raw.trim();
+  if (!value) return '';
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.toString();
+  } catch {
+    // Invalid URL; fall through to empty string.
+  }
+  return '';
+}
+
 const cardStyle: CSSProperties = { position: 'relative', background: 'var(--panel)', padding: '20px 22px' };
 const h2Style: CSSProperties = { margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, color: 'var(--ink)' };
 const bodyStyle: CSSProperties = { margin: '6px 0 0', fontSize: 13, lineHeight: 1.55, color: 'var(--ink2)' };
@@ -283,7 +295,7 @@ function AccountContent() {
               {profileAvatarUrl && !avatarLoadFailed ? (
                 // eslint-disable-next-line @next/next/no-img-element -- an arbitrary externally-pasted URL, not an optimizable local/remote asset Next's Image loader is configured for
                 <img
-                  src={profileAvatarUrl}
+                  src={sanitizeAvatarUrl(profileAvatarUrl)}
                   alt=""
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   onError={() => setAvatarLoadFailed(true)}
@@ -311,7 +323,7 @@ function AccountContent() {
                   type="url"
                   value={profileAvatarUrl}
                   onChange={(e) => {
-                    setProfileAvatarUrl(e.target.value);
+                    setProfileAvatarUrl(sanitizeAvatarUrl(e.target.value));
                     setAvatarLoadFailed(false);
                   }}
                   placeholder="https://example.com/photo.jpg"
