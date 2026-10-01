@@ -155,6 +155,24 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     7,
+		description: "add_expires_at_to_cloud_credentials",
+		up: func(tx sqlExecer) error {
+			// Nullable, no default: NULL means "no expiry tracked" (every
+			// existing row, and every new one unless the caller opts in via
+			// create/rotate's optional expires_at field). Same DATETIME/
+			// pgSchema dance as migration 4's onboarding_dismissed_at.
+			ddl := "ALTER TABLE cloud_credentials ADD COLUMN expires_at DATETIME"
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to add expires_at: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

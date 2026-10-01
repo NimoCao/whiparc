@@ -123,6 +123,62 @@ func checkProjectAccess(userID, projectID, minRole string) (allowed bool, status
 	return true, 0, ""
 }
 
+// checkTeamAccess is checkProjectAccess's team-level twin (Member <= Admin
+// <= Owner), used by RequireTeamRole and by handlers that need to check
+// team membership for a resource key by something other than the team ID
+// itself. Returns allowed; status/message are only meaningful when allowed
+// is false.
+func checkTeamAccess(userID, teamID, minRole string) (allowed bool, status int, message string) {
+	roleLevels := map[string]int{
+		"MEMBER": 1,
+		"ADMIN":  2,
+		"OWNER":  3,
+	}
+
+	var exists string
+	if err := db.QueryRow("SELECT id FROM teams WHERE id = ?", teamID).Scan(&exists); err != nil {
+		return false, http.StatusNotFound, "Team not found"
+	}
+
+	var userRole string
+	err := db.QueryRow("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?", teamID, userID).Scan(&userRole)
+	if err != nil {
+		return false, http.StatusForbidden, "Forbidden: Access denied to this team"
+	}
+
+	if roleLevels[userRole] < roleLevels[minRole] {
+		return false, http.StatusForbidden, "Forbidden: Insufficient privileges"
+	}
+
+	return true, 0, ""
+}
+
+// RequireTeamRole checks if the user has access to the team with at least the minimum role (Member <= Admin <= Owner)
+func RequireTeamRole(minRole string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, ok := GetUserFromContext(r)
+			if !ok {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+
+			teamId := r.PathValue("id")
+			if teamId == "" {
+				http.Error(w, "Bad Request: Team ID is required", http.StatusBadRequest)
+				return
+			}
+
+			if allowed, status, message := checkTeamAccess(user.ID, teamId, minRole); !allowed {
+				http.Error(w, message, status)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // RequireProjectRole checks if the user has access to the project with at least the minimum role (Viewer <= Editor <= Admin)
 func RequireProjectRole(minRole string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
