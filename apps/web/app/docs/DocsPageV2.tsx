@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import React, { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../store/useAuthStore';
@@ -204,6 +204,91 @@ const scrollToId = (id: string) => {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
+// Searchable text per section/subsection id, drawn from the real prose and
+// command snippets rendered in the article below — kept separate from the
+// JSX so it can be indexed without re-parsing rendered markup.
+const SEARCH_CONTENT: Record<string, string> = {
+  intro: 'Whiparc CLI integrate visual configuration layouts native infrastructure-as-code manifests synchronize local directories query workspace settings stream deployment pipelines terminals CI/CD',
+  'intro-capabilities': 'Code Reverse-Parsing Terraform HCL Ansible YAML Kubernetes manifests canvas visual blocks Live WebSocket Sync Deployment Logs Stream stdout',
+  install: 'download one-click installer whiparc binary PATH automatically works from any new terminal',
+  'install-download': 'download installer latest stable CLI version unsigned windows macos linux',
+  'install-steps': 'whiparc-setup-windows-amd64.exe whiparc-macos.pkg install.sh SmartScreen Gatekeeper whiparc --version manual install PATH',
+  'sandbox-intro': 'Local Sandbox Agent LocalStack simulated SSH targets no real cloud account compute your own machine outbound connection Docker containers laptop workstation',
+  'sandbox-intro-changes': 'deploys destroys log streaming canvas Runner tunnel Docker running Free plan paired Agent Pro plan hosted sandbox',
+  'sandbox-intro-docker': 'Docker Desktop licensing free individuals small businesses education open-source Podman Colima Rancher Desktop Windows WSL2',
+  'sandbox-setup': 'setup pairing bring up local sandbox containers pair Agent project CLI binary',
+  'sandbox-setup-login': 'whiparc login',
+  'sandbox-setup-enable': 'whiparc config set sandbox-agent-beta true opt-in beta feature',
+  'sandbox-setup-up': 'whiparc sandbox up --project SSH keypair docker compose register agent pairing Agent Gateway ACTIVE sandbox ready',
+  'sandbox-setup-deploy': 'deploy from canvas Agent Connected badge workspace header sandbox-targeted nodes',
+  'sandbox-setup-nosetup': 'no setup needed whiparc.com hosted API Agent Gateway default',
+  'sandbox-setup-selfhost': 'self-hosting local development whiparc config set api-url gateway-url ~/.whiparc/config.json',
+  'sandbox-commands': 'whiparc sandbox subcommand group command reference',
+  'sandbox-cmd-status': 'whiparc sandbox status PENDING ACTIVE DISCONNECTED last-seen',
+  'sandbox-cmd-pause': 'whiparc sandbox down stop containers keep pairing reconnect same agent cached images',
+  'sandbox-cmd-retire': 'whiparc sandbox down --revoke retire agent revoke server-side clear pairing',
+  'sandbox-cmd-service': 'whiparc sandbox agent install uninstall background service systemd launchd Windows Service elevated Administrator',
+  'sandbox-cmd-manage': 'managing paired agents Settings Sandbox Agents tab revoke Editor Admin',
+  'sandbox-troubleshooting': 'troubleshooting sandbox agent errors',
+  'ts-beta': 'opt-in beta flag whiparc config set sandbox-agent-beta true',
+  'ts-pending': 'agent status stuck PENDING Docker network issue docker ps Gateway URL',
+  'ts-disconnected': 'agent DISCONNECTED deploys rejected sleep WiFi VPN reconnect automatic backoff whiparc sandbox status',
+  'ts-not-connected': 'local Sandbox Agent not connected deploy destroy pre-flight check revoke Project Settings hosted sandbox',
+  'ts-migration': 'free-tier sandbox deploys own machine migration window pair Agent upgrade Pro hosted sandbox',
+  'ts-docker': 'Docker daemon not found Docker Desktop Podman Colima Rancher Desktop',
+  auth: 'authentication link commands user accounts workspace permission boundaries',
+  'auth-login': 'whiparc login prompt account email password session token',
+  'auth-logout': 'whiparc logout clear locally cached credentials end session',
+  projects: 'workspace projects CRUD query initialize delete visual canvas projects',
+  'projects-list': 'whiparc projects list',
+  'projects-create': 'whiparc projects create --name --visibility PRIVATE',
+  'projects-delete': 'whiparc projects delete --id --force',
+  import: 'importing IaC code existing configurations visual workspace resource structures nodes edges auto-arrange layout',
+  'import-file': 'whiparc import --project --file terraform main.tf single file',
+  'import-dir': 'whiparc import --project --dir deployments directory recursively scan',
+  deploy: 'deploy logs streaming visual canvas execution logs shell',
+  'deploy-run': 'whiparc deploy --project deployment tracker socket progress logs real-time',
+  'deploy-autodestroy': 'whiparc deploy --project --auto-destroy spin up testing systems tear down',
+};
+
+type SearchIndexEntry = { key: string; sectionId: string; anchorId?: string; label: string; group: string; snippet: string };
+
+const SEARCH_INDEX: SearchIndexEntry[] = NAV_SECTIONS.flatMap((group) =>
+  group.items.flatMap((item) => {
+    const top: SearchIndexEntry = {
+      key: item.id,
+      sectionId: item.id,
+      label: item.label,
+      group: group.group,
+      snippet: SEARCH_CONTENT[item.id] ?? '',
+    };
+    const subs: SearchIndexEntry[] = (SECTION_TOC[item.id] ?? []).map((sub) => ({
+      key: sub.id,
+      sectionId: item.id,
+      anchorId: sub.id,
+      label: sub.label,
+      group: item.label,
+      snippet: SEARCH_CONTENT[sub.id] ?? '',
+    }));
+    return [top, ...subs];
+  })
+);
+
+function searchDocs(query: string): SearchIndexEntry[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const labelHits: SearchIndexEntry[] = [];
+  const contentHits: SearchIndexEntry[] = [];
+  for (const entry of SEARCH_INDEX) {
+    if (entry.label.toLowerCase().includes(q)) {
+      labelHits.push(entry);
+    } else if (entry.snippet.toLowerCase().includes(q) || entry.group.toLowerCase().includes(q)) {
+      contentHits.push(entry);
+    }
+  }
+  return [...labelHits, ...contentHits].slice(0, 8);
+}
+
 export function DocsPageV2() {
   const { user, hasHydrated } = useAuthStore();
   const isLoggedIn = hasHydrated && !!user;
@@ -211,6 +296,64 @@ export function DocsPageV2() {
   const [theme, setTheme] = useState<Theme>('dark');
   const [activeTab, setActiveTab] = useState<'windows' | 'macos' | 'linux'>('windows');
   const [activeSection, setActiveSection] = useState<string>('intro');
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+  const searchResults = useMemo(() => searchDocs(searchQuery), [searchQuery]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const onClickOutside = (e: MouseEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  const selectSearchResult = (entry: SearchIndexEntry) => {
+    setActiveSection(entry.sectionId);
+    setSearchOpen(false);
+    setSearchQuery('');
+    searchInputRef.current?.blur();
+    if (entry.anchorId) {
+      requestAnimationFrame(() => requestAnimationFrame(() => scrollToId(entry.anchorId as string)));
+    }
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      setSearchOpen(false);
+      searchInputRef.current?.blur();
+      return;
+    }
+    if (!searchOpen || searchResults.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveResultIndex((i) => (i + 1) % searchResults.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveResultIndex((i) => (i - 1 + searchResults.length) % searchResults.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      selectSearchResult(searchResults[activeResultIndex]);
+    }
+  };
 
   // `releases` stays null while loading and becomes [] on a failed fetch or
   // if nothing's been tagged yet — both cases fall back to the static
@@ -295,14 +438,82 @@ export function DocsPageV2() {
           <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, color: 'var(--ink3)', borderLeft: '1px solid var(--line)', paddingLeft: 10, marginLeft: 2 }}>docs</span>
         </Link>
 
-        <div className="wp-docs-search" style={{ flex: 1, maxWidth: 360, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', height: 32, border: '1px solid var(--line)' }}>
-          <Icon icon="lucide:search" width={13} style={{ color: 'var(--ink3)', flexShrink: 0 }} />
-          <input
-            placeholder="Search docs"
-            className="wp-docs-input"
-            style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', fontSize: 13, color: 'var(--ink)', fontFamily: 'var(--font-body-marketing), sans-serif' }}
-          />
-          <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, color: 'var(--ink3)', border: '1px solid var(--line)', padding: '1px 4px', flexShrink: 0 }}>⌘K</span>
+        <div ref={searchBoxRef} style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
+          <div className="wp-docs-search" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', height: 32, border: '1px solid var(--line)' }}>
+            <Icon icon="lucide:search" width={13} style={{ color: 'var(--ink3)', flexShrink: 0 }} />
+            <input
+              ref={searchInputRef}
+              placeholder="Search docs"
+              className="wp-docs-input"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSearchOpen(true);
+                setActiveResultIndex(0);
+              }}
+              onFocus={() => searchQuery && setSearchOpen(true)}
+              onKeyDown={handleSearchKeyDown}
+              role="combobox"
+              aria-expanded={searchOpen && searchResults.length > 0}
+              aria-controls="docs-search-results"
+              aria-autocomplete="list"
+              style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', fontSize: 13, color: 'var(--ink)', fontFamily: 'var(--font-body-marketing), sans-serif' }}
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSearchOpen(false);
+                  setActiveResultIndex(0);
+                  searchInputRef.current?.focus();
+                }}
+                aria-label="Clear search"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', border: 0, background: 'transparent', color: 'var(--ink3)', cursor: 'pointer', flexShrink: 0, padding: 2 }}
+              >
+                <Icon icon="lucide:x" width={12} />
+              </button>
+            ) : (
+              <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, color: 'var(--ink3)', border: '1px solid var(--line)', padding: '1px 4px', flexShrink: 0 }}>⌘K</span>
+            )}
+          </div>
+
+          {searchOpen && searchQuery && (
+            <div
+              id="docs-search-results"
+              role="listbox"
+              className="wp-blueprint"
+              style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, background: 'var(--panel)', border: '1px solid var(--line)', boxShadow: '0 8px 24px rgba(0,0,0,.25)', zIndex: 30, maxHeight: 320, overflowY: 'auto' }}
+            >
+              {searchResults.length === 0 ? (
+                <p style={{ margin: 0, padding: '14px 14px', fontSize: 12.5, color: 'var(--ink3)' }}>No results for &ldquo;{searchQuery}&rdquo;.</p>
+              ) : (
+                searchResults.map((entry, i) => (
+                  <button
+                    key={entry.key}
+                    type="button"
+                    role="option"
+                    aria-selected={i === activeResultIndex}
+                    onMouseEnter={() => setActiveResultIndex(i)}
+                    onClick={() => selectSearchResult(entry)}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '9px 14px',
+                      border: 0,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      background: i === activeResultIndex ? 'var(--elevated)' : 'transparent',
+                    }}
+                  >
+                    <div style={{ fontSize: 13, color: 'var(--ink)' }}>{entry.label}</div>
+                    <div style={{ marginTop: 2, fontSize: 10.5, fontFamily: 'var(--font-mono-marketing)', color: 'var(--ink3)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{entry.group}</div>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
