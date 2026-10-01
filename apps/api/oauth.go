@@ -314,7 +314,7 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := GenerateToken(user.ID, user.Email, user.Name, user.Plan, user.EmailVerified)
+	token, err := GenerateToken(user.ID, user.Email, user.Name, user.EmailVerified)
 	if err != nil {
 		log.Printf("[OAUTH] Failed to sign token: %v\n", err)
 		http.Error(w, "Failed to sign token: "+err.Error(), http.StatusInternalServerError)
@@ -570,7 +570,6 @@ type oauthResolvedUser struct {
 	ID            string
 	Email         string
 	Name          string
-	Plan          string
 	EmailVerified bool
 }
 
@@ -649,7 +648,7 @@ func findOrCreateOAuthUser(provider, providerUserID, email string, emailVerified
 
 func loadOAuthResolvedUser(userID string) (*oauthResolvedUser, error) {
 	var u oauthResolvedUser
-	err := db.QueryRow("SELECT id, email, name, plan, email_verified FROM users WHERE id = ?", userID).Scan(&u.ID, &u.Email, &u.Name, &u.Plan, &u.EmailVerified)
+	err := db.QueryRow("SELECT id, email, name, email_verified FROM users WHERE id = ?", userID).Scan(&u.ID, &u.Email, &u.Name, &u.EmailVerified)
 	if err != nil {
 		return nil, err
 	}

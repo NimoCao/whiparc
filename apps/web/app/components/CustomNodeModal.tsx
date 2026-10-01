@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../store/useAuthStore';
 import useCanvasStore from '../store/useCanvasStore';
@@ -36,8 +37,9 @@ const KICKER_STYLE = {
 } as const;
 
 export default function CustomNodeModal({ isOpen, onClose, projectId }: CustomNodeModalProps) {
-  const { user, token, upgradePlan } = useAuthStore();
+  const { user, token } = useAuthStore();
   const { addCustomLibraryNode, addNode } = useCanvasStore();
+  const router = useRouter();
 
   const [tech, setTech] = useState<'Terraform' | 'Ansible' | 'Kubernetes'>('Terraform');
   const [title, setTitle] = useState('');
@@ -50,7 +52,6 @@ export default function CustomNodeModal({ isOpen, onClose, projectId }: CustomNo
   const [extractedParams, setExtractedParams] = useState<string[]>([]);
   const [isValid, setIsValid] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [upgradeLoading, setUpgradeLoading] = useState(false);
   const [isTechDropdownOpen, setIsTechDropdownOpen] = useState(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -112,13 +113,13 @@ spec:
 
   if (!isOpen) return null;
 
-  const handleUpgrade = async () => {
-    setUpgradeLoading(true);
-    const success = await upgradePlan('PRO');
-    setUpgradeLoading(false);
-    if (!success) {
-      alert("Failed to activate premium sandbox upgrade.");
-    }
+  // Real checkout needs a team to bill (Paddle.js's customData.team_id) and
+  // lives on the Team page's Billing card — this modal has no team context
+  // of its own, so it hands off there rather than trying to embed checkout
+  // in a paywall dialog. See product-memory 08.5 item G1.
+  const handleUpgrade = () => {
+    onClose();
+    router.push('/team');
   };
 
   const handleValidate = async () => {
@@ -334,7 +335,6 @@ spec:
             <button
               type="button"
               onClick={handleUpgrade}
-              disabled={upgradeLoading}
               className="wp-blueprint wp-cnm-primary"
               style={{
                 height: 42,
@@ -344,8 +344,7 @@ spec:
                 fontFamily: 'var(--font-display, inherit)',
                 fontWeight: 600,
                 fontSize: 14,
-                cursor: upgradeLoading ? 'default' : 'pointer',
-                opacity: upgradeLoading ? 0.6 : 1,
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -353,7 +352,7 @@ spec:
               }}
             >
               <BlueprintCorners />
-              {upgradeLoading ? <Icon icon="lucide:loader-2" width={15} className="animate-spin" /> : <Icon icon="lucide:zap" width={15} />}
+              <Icon icon="lucide:zap" width={15} />
               Upgrade to Pro (Instant Sandbox)
             </button>
             <button

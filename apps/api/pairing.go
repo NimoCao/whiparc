@@ -630,15 +630,33 @@ func sandboxAgentGracePeriodEnd(cutoff time.Time) time.Time {
 	return cutoff.AddDate(0, 0, days)
 }
 
+// teamPlanForProject resolves the plan of the team that owns a project,
+// fresh from the DB every call — the only source of truth for plan since
+// billing moved to teams (product-memory 08.5 item G1). Every project has
+// exactly one owning team (projects.team_id is NOT NULL), so this has no
+// orphan/ambiguous case to handle, unlike resolving "the user's plan" would
+// once a user can belong to several teams with different plans.
+func teamPlanForProject(projectID string) (plan string, ok bool) {
+	err := db.QueryRow("SELECT t.plan FROM projects p JOIN teams t ON t.id = p.team_id WHERE p.id = ?", projectID).Scan(&plan)
+	if err != nil {
+		return "", false
+	}
+	return plan, true
+}
+
 // sandboxDeployGatedForFreeTier reports whether a sandbox deploy must be
-// rejected under the default flip: a FREE-plan user, gating actually active,
-// and — depending on whether they signed up before or after the cutoff —
-// either past the flip date outright or past their grace period. Fails open
-// (returns false) on any DB error, matching this file's existing style for
-// non-critical lookups (e.g. latestPairedAgentStatus) — a lookup hiccup here
-// should not block every free user's deploy.
-func sandboxDeployGatedForFreeTier(userID, plan string) bool {
-	if plan != "FREE" || !sandboxAgentDefaultEnabled() {
+// rejected under the default flip: a FREE-plan team, gating actually active,
+// and — depending on whether the deploying user signed up before or after
+// the cutoff — either past the flip date outright or past their grace
+// period. Fails open (returns false) on any DB error, matching this file's
+// existing style for non-critical lookups (e.g. latestPairedAgentStatus) — a
+// lookup hiccup here should not block every free user's deploy.
+func sandboxDeployGatedForFreeTier(userID, projectID string) bool {
+	// Ordered so the two env-only checks (cheap, no DB) short-circuit before
+	// either DB lookup below — same property the pre-G1 version had with its
+	// plan-as-parameter signature, preserved here even though resolving plan
+	// now costs a query itself (see sandbox_default_flip_test.go).
+	if !sandboxAgentDefaultEnabled() {
 		return false
 	}
 	cutoff, ok := sandboxAgentDefaultCutoff()
@@ -647,6 +665,11 @@ func sandboxDeployGatedForFreeTier(userID, plan string) bool {
 	}
 	now := time.Now()
 	if now.Before(cutoff) {
+		return false
+	}
+
+	plan, ok := teamPlanForProject(projectID)
+	if !ok || plan != "FREE" {
 		return false
 	}
 
@@ -677,7 +700,12 @@ func sandboxDeployGatedForFreeTier(userID, plan string) bool {
 func handleGetSandboxMigrationStatus(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
 	user, ok := GetUserFromContext(r)
-	if !ok || user.Plan != "FREE" {
+	if !ok {
+		http.Error(w, "Not applicable", http.StatusNotFound)
+		return
+	}
+	plan, planOK := teamPlanForProject(projectID)
+	if !planOK || plan != "FREE" {
 		http.Error(w, "Not applicable", http.StatusNotFound)
 		return
 	}
@@ -688,7 +716,7 @@ func handleGetSandboxMigrationStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"gated":            sandboxDeployGatedForFreeTier(user.ID, user.Plan),
+		"gated":            sandboxDeployGatedForFreeTier(user.ID, projectID),
 		"has_active_agent": resolvePairedAgent(projectID) != nil,
 		"cutoff":           cutoff.Format("2006-01-02"),
 		"grace_period_end": sandboxAgentGracePeriodEnd(cutoff).Format("2006-01-02"),

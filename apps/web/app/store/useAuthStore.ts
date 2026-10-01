@@ -37,7 +37,6 @@ interface AuthState {
   setSessionFromToken: (token: string) => boolean;
   logout: () => void;
   clearError: () => void;
-  upgradePlan: (newPlan: string) => Promise<boolean>;
   updateProfile: (payload: { name?: string; avatar_url?: string }) => Promise<{ success: boolean; error?: string }>;
   requestEmailChange: (newEmail: string, currentPassword: string) => Promise<{ success: boolean; message?: string; error?: string }>;
   confirmEmailChange: (token: string) => Promise<{ success: boolean; email?: string; error?: string }>;
@@ -72,9 +71,13 @@ function decodeTokenClaims(token: string): User | null {
       id: claims.id,
       email: claims.email,
       name: claims.name,
-      plan: claims.plan,
+      // Not carried in the JWT (nor is plan, below) — a user can belong to
+      // several teams with different plans since billing moved to teams
+      // (product-memory 08.5 item G1), so there's no single value to decode
+      // here even if it were present. Refreshed by the fetchMe() call
+      // setSessionFromToken triggers below, same as onboarding_dismissed.
+      plan: '',
       email_verified: claims.email_verified ?? false,
-      // Not carried in the JWT — refreshed by the fetchMe() call setSessionFromToken triggers below.
       onboarding_dismissed: false,
       avatar_url: '',
       pending_email: '',
@@ -282,32 +285,6 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
         set({ token: null, user: null, error: null });
-      },
-
-      upgradePlan: async (newPlan) => {
-        const token = get().token;
-        if (!token) return false;
-        try {
-          const res = await fetch(`${API_URL}/api/auth/upgrade`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ plan: newPlan }),
-          });
-
-          if (!res.ok) {
-            throw new Error('Failed to upgrade plan');
-          }
-
-          const data = await res.json();
-          set({ token: data.token, user: data.user });
-          return true;
-        } catch (err: unknown) {
-          console.error("Upgrade error", err);
-          return false;
-        }
       },
 
       updateProfile: async (payload) => {

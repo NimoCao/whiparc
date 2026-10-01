@@ -137,6 +137,7 @@ func handleRemoveTeamMember(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Team member not found", http.StatusNotFound)
 		return
 	}
+	go syncTeamBillingSeats(teamID)
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Member removed successfully"})
@@ -510,6 +511,7 @@ func handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Transaction commit failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	go syncTeamBillingSeats(teamID)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"team_id": teamID, "message": "Invite accepted"})

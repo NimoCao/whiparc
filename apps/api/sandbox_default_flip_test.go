@@ -83,24 +83,27 @@ func TestSandboxAgentGracePeriodEndIgnoresInvalidOverride(t *testing.T) {
 }
 
 func TestSandboxDeployGatedForFreeTierShortCircuitsWithoutDBLookup(t *testing.T) {
-	// These cases all resolve to false before ever reaching the users table
-	// lookup, so they're safe to exercise with db still nil (package main's
-	// zero-value default outside of main() actually running).
+	// These cases all resolve to false via the two env-only checks (gating
+	// enabled, cutoff reached) before the function ever reaches
+	// teamPlanForProject's DB lookup, so they're safe to exercise with db
+	// still nil (package main's zero-value default outside of main() actually
+	// running). Since G1 moved plan from a parameter to a DB-resolved value
+	// (teams.plan via the project's team — see teamPlanForProject), there's
+	// no longer a pure "PRO plan short-circuits" case to test here the same
+	// way: resolving plan at all now requires the DB call this test exists to
+	// avoid, so that case moved to manual verification along with the rest of
+	// this function's DB-touching behavior (see the file-level comment).
 	t.Setenv("SANDBOX_AGENT_BETA", "true")
 	t.Setenv("SANDBOX_AGENT_DEFAULT", "true")
 	t.Setenv("SANDBOX_AGENT_DEFAULT_CUTOFF", "2099-01-01") // far future — "now" is always before it
 
-	if got := sandboxDeployGatedForFreeTier("user-1", "PRO"); got {
-		t.Error("sandboxDeployGatedForFreeTier() for a PRO plan, want false")
-	}
-
 	t.Setenv("SANDBOX_AGENT_DEFAULT", "false")
-	if got := sandboxDeployGatedForFreeTier("user-1", "FREE"); got {
+	if got := sandboxDeployGatedForFreeTier("user-1", "project-1"); got {
 		t.Error("sandboxDeployGatedForFreeTier() with gating disabled, want false")
 	}
 
 	t.Setenv("SANDBOX_AGENT_DEFAULT", "true")
-	if got := sandboxDeployGatedForFreeTier("user-1", "FREE"); got {
+	if got := sandboxDeployGatedForFreeTier("user-1", "project-1"); got {
 		t.Error("sandboxDeployGatedForFreeTier() before the cutoff date has arrived, want false")
 	}
 }
