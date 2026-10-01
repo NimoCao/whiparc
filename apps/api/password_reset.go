@@ -14,12 +14,13 @@ import (
 
 const passwordResetTTL = 1 * time.Hour
 
-// hashResetToken hashes a raw reset token before it's stored, so a DB read
+// hashToken hashes a raw opaque token before it's stored, so a DB read
 // (backup, replica, compromised query) never hands out something directly
-// usable to reset an account — same reasoning as password_hash itself,
+// usable to act on an account — same reasoning as password_hash itself,
 // though sha256 (not bcrypt) is enough here since the raw token is already
 // 32 random bytes of entropy generated server-side, not a user-chosen value.
-func hashResetToken(raw string) string {
+// Shared by password reset (this file) and email change (email_change.go).
+func hashToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }
@@ -49,7 +50,7 @@ func sendPasswordResetForUser(userID, email, name string) {
 
 	if _, err := db.Exec(
 		"INSERT INTO password_resets (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)",
-		id, userID, hashResetToken(rawToken), expiresAt,
+		id, userID, hashToken(rawToken), expiresAt,
 	); err != nil {
 		log.Printf("[PASSWORD RESET] Failed to insert reset token for %s: %v\n", userID, err)
 		return
@@ -109,7 +110,7 @@ func handleCheckResetToken(w http.ResponseWriter, r *http.Request) {
 	var expiresAt time.Time
 	err := db.QueryRow(
 		"SELECT user_id, expires_at FROM password_resets WHERE token_hash = ? AND used_at IS NULL",
-		hashResetToken(token),
+		hashToken(token),
 	).Scan(&userID, &expiresAt)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -152,7 +153,7 @@ func handleResetPassword(w http.ResponseWriter, r *http.Request) {
 	var expiresAt time.Time
 	err := db.QueryRow(
 		"SELECT id, user_id, expires_at FROM password_resets WHERE token_hash = ? AND used_at IS NULL",
-		hashResetToken(payload.Token),
+		hashToken(payload.Token),
 	).Scan(&resetID, &userID, &expiresAt)
 	if err == sql.ErrNoRows || (err == nil && time.Now().After(expiresAt)) {
 		http.Error(w, "This link is invalid or has expired. Request a new one.", http.StatusBadRequest)

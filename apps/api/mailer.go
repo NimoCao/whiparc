@@ -76,6 +76,13 @@ type EmailSender interface {
 	// password" (an OAuth-only account with no password_hash yet) — see
 	// product-memory 08.5 item G3.
 	SendPasswordResetEmail(toEmail, toName, resetLink string, hasPassword bool) error
+	// SendEmailChangeVerification goes to the NEW address being confirmed;
+	// SendEmailChangeNotice goes to the OLD (still-current) address as a
+	// heads-up, with no link — so an account takeover attempt via a stolen
+	// session can't silently redirect the account's email without the real
+	// owner finding out. See product-memory 08.5 item G2 follow-up.
+	SendEmailChangeVerification(toEmail, toName, confirmLink string) error
+	SendEmailChangeNotice(toEmail, toName, newEmail string) error
 }
 
 // ConsoleMailer logs transactional emails directly to the server logs for local development.
@@ -114,6 +121,26 @@ func (c *ConsoleMailer) SendPasswordResetEmail(toEmail, toName, resetLink string
 	divider := strings.Repeat("=", 70)
 	log.Printf("\n%s\n[EMAIL DISPATCH - LOCAL/DEV CONSOLE MODE]\nTo: %s\nSubject: %s\nAction Link: %s\nExpires: in 1 hour\n%s\n",
 		divider, cleanEmail, subject, cleanLink, divider)
+	return nil
+}
+
+func (c *ConsoleMailer) SendEmailChangeVerification(toEmail, toName, confirmLink string) error {
+	cleanEmail := sanitizeHeaderField(toEmail)
+	cleanLink := sanitizeHeaderField(confirmLink)
+
+	divider := strings.Repeat("=", 70)
+	log.Printf("\n%s\n[EMAIL DISPATCH - LOCAL/DEV CONSOLE MODE]\nTo: %s\nSubject: Confirm your new Whiparc email\nAction Link: %s\nExpires: in 24 hours\n%s\n",
+		divider, cleanEmail, cleanLink, divider)
+	return nil
+}
+
+func (c *ConsoleMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) error {
+	cleanEmail := sanitizeHeaderField(toEmail)
+	cleanNewEmail := sanitizeHeaderField(newEmail)
+
+	divider := strings.Repeat("=", 70)
+	log.Printf("\n%s\n[EMAIL DISPATCH - LOCAL/DEV CONSOLE MODE]\nTo: %s\nSubject: Your Whiparc email is being changed\nBody: A change to %s was requested. If this wasn't you, contact support.\n%s\n",
+		divider, cleanEmail, cleanNewEmail, divider)
 	return nil
 }
 
@@ -330,6 +357,136 @@ func (r *ResendMailer) SendPasswordResetEmail(toEmail, toName, resetLink string,
 	return nil
 }
 
+func (r *ResendMailer) SendEmailChangeVerification(toEmail, toName, confirmLink string) error {
+	cleanEmail := sanitizeHeaderField(toEmail)
+	cleanName := validateEmailContentName(toName)
+	cleanLink := sanitizeHeaderField(confirmLink)
+
+	escapedName := html.EscapeString(cleanName)
+	escapedLink := html.EscapeString(cleanLink)
+
+	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Confirm your new email</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d1117; color: #c9d1d9; padding: 40px 20px;">
+  <div style="max-width: 560px; margin: 0 auto; background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px;">
+    <h1 style="color: #58a6ff; font-size: 24px; margin-top: 0;">Confirm your new email</h1>
+    <p style="font-size: 15px; line-height: 1.6; color: #8b949e;">Hi %s, we received a request to change the email address on your Whiparc account to this one. Confirm it below.</p>
+    <div style="margin: 32px 0; text-align: center;">
+      <a href="%s" style="display: inline-block; background-color: #238636; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 16px;">Confirm Email</a>
+    </div>
+    <p style="font-size: 13px; color: #8b949e;">Or copy and paste this link into your browser:</p>
+    <p style="font-size: 12px; color: #58a6ff; word-break: break-all;">%s</p>
+    <hr style="border: 0; border-top: 1px solid #30363d; margin: 32px 0 16px 0;" />
+    <p style="font-size: 12px; color: #484f58; margin: 0;">If you did not request this, you can safely ignore this email — your account's email will not change. This link will expire in 24 hours.</p>
+  </div>
+</body>
+</html>`, escapedName, escapedLink, escapedLink)
+
+	textBody := fmt.Sprintf("Confirm your new email\n\nHi %s, we received a request to change the email address on your Whiparc account to this one.\n\nOpen the following link to confirm:\n%s\n\nIf you did not request this, you can safely ignore this email. This link expires in 24 hours.", cleanName, cleanLink)
+
+	payload := map[string]interface{}{
+		"from":    r.from,
+		"to":      []string{cleanEmail},
+		"subject": "Confirm your new Whiparc email",
+		"html":    htmlBody,
+		"text":    textBody,
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", "https://api.resend.com/emails", bytes.NewReader(payloadJSON))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+r.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("resend api request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("resend returned status code %d", resp.StatusCode)
+	}
+
+	log.Printf("[EMAIL] Email change verification sent to %s via Resend\n", cleanEmail)
+	return nil
+}
+
+func (r *ResendMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) error {
+	cleanEmail := sanitizeHeaderField(toEmail)
+	cleanName := validateEmailContentName(toName)
+	// newEmail is an address ValidateEmail already structurally validated
+	// before this send was ever triggered (see handleRequestEmailChange) —
+	// not arbitrary free text, so the header-injection guard is enough here;
+	// validateEmailContentName's allowlist (no "@") is for display names and
+	// would reject every real address.
+	cleanNewEmail := sanitizeHeaderField(newEmail)
+
+	escapedName := html.EscapeString(cleanName)
+	escapedNewEmail := html.EscapeString(cleanNewEmail)
+
+	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Your Whiparc email is being changed</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d1117; color: #c9d1d9; padding: 40px 20px;">
+  <div style="max-width: 560px; margin: 0 auto; background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px;">
+    <h1 style="color: #d29922; font-size: 24px; margin-top: 0;">Your email is being changed</h1>
+    <p style="font-size: 15px; line-height: 1.6; color: #8b949e;">Hi %s, a request was made to change your Whiparc account's email to <strong style="color: #c9d1d9;">%s</strong>. We've sent a confirmation link there — your email on file only changes once that link is confirmed.</p>
+    <hr style="border: 0; border-top: 1px solid #30363d; margin: 32px 0 16px 0;" />
+    <p style="font-size: 12px; color: #484f58; margin: 0;">If you did not request this, no action is needed to stop it — it only completes if the new address is confirmed — but please contact support so we can look into it.</p>
+  </div>
+</body>
+</html>`, escapedName, escapedNewEmail)
+
+	textBody := fmt.Sprintf("Your email is being changed\n\nHi %s, a request was made to change your Whiparc account's email to %s. We've sent a confirmation link there — your email on file only changes once that link is confirmed.\n\nIf you did not request this, contact support.", cleanName, cleanNewEmail)
+
+	payload := map[string]interface{}{
+		"from":    r.from,
+		"to":      []string{cleanEmail},
+		"subject": "Your Whiparc email is being changed",
+		"html":    htmlBody,
+		"text":    textBody,
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", "https://api.resend.com/emails", bytes.NewReader(payloadJSON))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+r.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("resend api request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("resend returned status code %d", resp.StatusCode)
+	}
+
+	log.Printf("[EMAIL] Email change notice sent to %s via Resend\n", cleanEmail)
+	return nil
+}
+
 // SMTPMailer sends emails via standard SMTP server.
 type SMTPMailer struct {
 	host string
@@ -449,6 +606,78 @@ func (s *SMTPMailer) SendPasswordResetEmail(toEmail, toName, resetLink string, h
 	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
 	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
 	body := fmt.Sprintf("%s\r\n\r\nOpen the following link to continue:\r\n%s\r\n\r\nIf you did not request this, you can safely ignore this email — your password will not change. This link will expire in 1 hour.\r\n", intro, safeLink)
+
+	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
+
+	var auth smtp.Auth
+	if s.user != "" {
+		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
+	}
+
+	return s.sendMail(addr, auth, trustedFromAddress, []string{parsedTo.Address}, msg)
+}
+
+func (s *SMTPMailer) SendEmailChangeVerification(toEmail, toName, confirmLink string) error {
+	parsedTo, err := mail.ParseAddress(toEmail)
+	if err != nil {
+		return fmt.Errorf("invalid recipient address: %w", err)
+	}
+
+	parsedURL, err := url.ParseRequestURI(confirmLink)
+	if err != nil {
+		return fmt.Errorf("invalid confirmation link: %w", err)
+	}
+	safeLink := parsedURL.String()
+
+	cleanName := validateEmailContentName(toName)
+	const trustedFromAddress = "noreply@whiparc.com"
+	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
+
+	toAddress := (&mail.Address{Name: cleanName, Address: parsedTo.Address}).String()
+
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	subject := "Subject: Confirm your new Whiparc email\r\n"
+	fromHeader := fmt.Sprintf("From: %s\r\n", trustedFromHeader)
+	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
+	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
+	body := fmt.Sprintf("We received a request to change the email address on your Whiparc account to this one.\r\n\r\nOpen the following link to confirm:\r\n%s\r\n\r\nIf you did not request this, you can safely ignore this email — your account's email will not change. This link will expire in 24 hours.\r\n", safeLink)
+
+	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
+
+	var auth smtp.Auth
+	if s.user != "" {
+		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
+	}
+
+	return s.sendMail(addr, auth, trustedFromAddress, []string{parsedTo.Address}, msg)
+}
+
+func (s *SMTPMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) error {
+	parsedTo, err := mail.ParseAddress(toEmail)
+	if err != nil {
+		return fmt.Errorf("invalid recipient address: %w", err)
+	}
+
+	cleanName := validateEmailContentName(toName)
+	// newEmail is already structurally validated by ValidateEmail before this
+	// send is triggered — mail.ParseAddress here is belt-and-suspenders, not
+	// a free-text guard (see the ResendMailer version's comment for why
+	// validateEmailContentName's name-allowlist doesn't fit an address).
+	parsedNew, err := mail.ParseAddress(newEmail)
+	if err != nil {
+		return fmt.Errorf("invalid new address: %w", err)
+	}
+	const trustedFromAddress = "noreply@whiparc.com"
+	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
+
+	toAddress := (&mail.Address{Name: cleanName, Address: parsedTo.Address}).String()
+
+	addr := fmt.Sprintf("%s:%d", s.host, s.port)
+	subject := "Subject: Your Whiparc email is being changed\r\n"
+	fromHeader := fmt.Sprintf("From: %s\r\n", trustedFromHeader)
+	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
+	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
+	body := fmt.Sprintf("A request was made to change your Whiparc account's email to %s. We've sent a confirmation link there — your email on file only changes once that link is confirmed.\r\n\r\nIf you did not request this, please contact support.\r\n", parsedNew.Address)
 
 	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
 

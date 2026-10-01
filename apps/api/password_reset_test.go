@@ -55,7 +55,7 @@ func TestPasswordResetFlowSetsPasswordAndIsSingleUse(t *testing.T) {
 	// through a token we mint ourselves via the same helper, matching how a
 	// real raw token would arrive by email.
 	rawToken := "test-raw-token-value"
-	if _, err := testDB.Exec("UPDATE password_resets SET token_hash = ? WHERE id = ?", hashResetToken(rawToken), resetID); err != nil {
+	if _, err := testDB.Exec("UPDATE password_resets SET token_hash = ? WHERE id = ?", hashToken(rawToken), resetID); err != nil {
 		t.Fatalf("failed to pin token hash for test: %v", err)
 	}
 

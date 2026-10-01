@@ -569,9 +569,10 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	emailVerified := user.EmailVerified
 	var onboardingDismissedAt sql.NullTime
 	var avatarURL sql.NullString
+	var pendingEmail sql.NullString
 
-	err := db.QueryRow("SELECT email, name, plan, email_verified, onboarding_dismissed_at, avatar_url FROM users WHERE id = ?", user.ID).
-		Scan(&email, &name, &plan, &emailVerified, &onboardingDismissedAt, &avatarURL)
+	err := db.QueryRow("SELECT email, name, plan, email_verified, onboarding_dismissed_at, avatar_url, pending_email FROM users WHERE id = ?", user.ID).
+		Scan(&email, &name, &plan, &emailVerified, &onboardingDismissedAt, &avatarURL, &pendingEmail)
 	if err != nil && err != sql.ErrNoRows {
 		log.Printf("[AUTH] Warning: failed to query live user for me endpoint: %v\n", err)
 	}
@@ -586,6 +587,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		"email_verified":       emailVerified,
 		"onboarding_dismissed": onboardingDismissed,
 		"avatar_url":           avatarURL.String,
+		"pending_email":        pendingEmail.String,
 		"user": map[string]interface{}{
 			"id":                   user.ID,
 			"email":                email,
@@ -594,6 +596,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 			"email_verified":       emailVerified,
 			"onboarding_dismissed": onboardingDismissed,
 			"avatar_url":           avatarURL.String,
+			"pending_email":        pendingEmail.String,
 		},
 	})
 }

@@ -221,6 +221,35 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     10,
+		description: "add_pending_email_change_to_users",
+		up: func(tx sqlExecer) error {
+			// Columns on `users`, not a separate table like password_resets —
+			// there's only ever one *live* pending change per account (a new
+			// request overwrites the old one), so there's no history worth
+			// keeping and no separate single-use/audit bookkeeping needed the
+			// way password_resets' used_at provides. token_hash follows the
+			// same "never store the raw token" reasoning as password_resets.
+			if _, err := tx.Exec("ALTER TABLE users ADD COLUMN pending_email TEXT"); err != nil {
+				return fmt.Errorf("failed to add pending_email: %w", err)
+			}
+			if _, err := tx.Exec("ALTER TABLE users ADD COLUMN pending_email_token_hash TEXT"); err != nil {
+				return fmt.Errorf("failed to add pending_email_token_hash: %w", err)
+			}
+			ddl := "ALTER TABLE users ADD COLUMN pending_email_expires_at DATETIME"
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to add pending_email_expires_at: %w", err)
+			}
+			if _, err := tx.Exec("CREATE INDEX idx_users_pending_email_token_hash ON users(pending_email_token_hash)"); err != nil {
+				return fmt.Errorf("failed to create pending_email_token_hash index: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

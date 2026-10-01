@@ -131,16 +131,17 @@ type RunTracker struct {
 }
 
 var (
-	db            *dbHandle
-	dbBackend     string // "sqlite" (default) or "postgres" — set once in main()
-	upgrader      = websocket.Upgrader{CheckOrigin: checkWebsocketOrigin}
-	trackers      = make(map[string]*RunTracker)
-	trackersMutex sync.Mutex
-	emailSender   EmailSender
-	signupLimiter *RateLimiter
-	loginLimiter  *RateLimiter
-	resendLimiter *RateLimiter
-	forgotLimiter *RateLimiter
+	db                 *dbHandle
+	dbBackend          string // "sqlite" (default) or "postgres" — set once in main()
+	upgrader           = websocket.Upgrader{CheckOrigin: checkWebsocketOrigin}
+	trackers           = make(map[string]*RunTracker)
+	trackersMutex      sync.Mutex
+	emailSender        EmailSender
+	signupLimiter      *RateLimiter
+	loginLimiter       *RateLimiter
+	resendLimiter      *RateLimiter
+	forgotLimiter      *RateLimiter
+	emailChangeLimiter *RateLimiter
 )
 
 // waitForPostgres retries the initial ping instead of failing on first
@@ -281,10 +282,11 @@ func main() {
 
 	// Initialize mailer and rate limiters
 	emailSender = NewEmailSender()
-	signupLimiter = NewRateLimiter(5, 1*time.Hour, 5)     // 5 signups per hour per IP
-	loginLimiter = NewRateLimiter(10, 15*time.Minute, 10) // 10 logins per 15 min per IP
-	resendLimiter = NewRateLimiter(3, 15*time.Minute, 3)  // 3 resends per 15 min per user/IP
-	forgotLimiter = NewRateLimiter(5, 15*time.Minute, 5)  // 5 forgot-password requests per 15 min per IP
+	signupLimiter = NewRateLimiter(5, 1*time.Hour, 5)         // 5 signups per hour per IP
+	loginLimiter = NewRateLimiter(10, 15*time.Minute, 10)     // 10 logins per 15 min per IP
+	resendLimiter = NewRateLimiter(3, 15*time.Minute, 3)      // 3 resends per 15 min per user/IP
+	forgotLimiter = NewRateLimiter(5, 15*time.Minute, 5)      // 5 forgot-password requests per 15 min per IP
+	emailChangeLimiter = NewRateLimiter(5, 15*time.Minute, 5) // 5 email-change requests per 15 min per user
 
 	// Set up routing
 	mux := http.NewServeMux()
@@ -321,6 +323,8 @@ func main() {
 	mux.Handle("GET /api/auth/identities", AuthMiddleware(http.HandlerFunc(handleGetIdentities)))
 	mux.Handle("DELETE /api/auth/identities/{provider}", AuthMiddleware(http.HandlerFunc(handleUnlinkIdentity)))
 	mux.Handle("POST /api/auth/link-ticket", AuthMiddleware(http.HandlerFunc(handleCreateLinkTicket)))
+	mux.Handle("POST /api/auth/email/change", AuthMiddleware(http.HandlerFunc(handleRequestEmailChange)))
+	mux.HandleFunc("POST /api/auth/email/confirm", enableCORS(handleConfirmEmailChange))
 	mux.Handle("GET /api/activity", AuthMiddleware(http.HandlerFunc(handleGetActivity)))
 	mux.HandleFunc("GET /api/auth/{provider}/login", handleOAuthLogin)
 	mux.HandleFunc("GET /api/auth/{provider}/callback", handleOAuthCallback)

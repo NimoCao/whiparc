@@ -68,6 +68,11 @@ function AccountContent() {
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
 
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [currentPasswordInput, setCurrentPasswordInput] = useState('');
+  const [changingEmail, setChangingEmail] = useState(false);
+
   useEffect(() => {
     if (hasHydrated && !user) router.replace('/login?redirect=/account');
   }, [hasHydrated, user, router]);
@@ -100,6 +105,27 @@ function AccountContent() {
       setNotice({ kind: 'success', text: 'Profile updated.' });
     } else {
       setActionError(result.error || 'Failed to update profile.');
+    }
+  };
+
+  const handleRequestEmailChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedEmail = newEmail.trim();
+    if (!trimmedEmail || !currentPasswordInput) {
+      setActionError('Enter the new email and your current password.');
+      return;
+    }
+    setChangingEmail(true);
+    setActionError(null);
+    const result = await useAuthStore.getState().requestEmailChange(trimmedEmail, currentPasswordInput);
+    setChangingEmail(false);
+    if (result.success) {
+      setNotice({ kind: 'success', text: result.message || 'Check your new email address for a confirmation link.' });
+      setShowEmailForm(false);
+      setNewEmail('');
+      setCurrentPasswordInput('');
+    } else {
+      setActionError(result.error || 'Failed to request an email change.');
     }
   };
 
@@ -272,7 +298,79 @@ function AccountContent() {
         <div className="wp-blueprint" style={cardStyle}>
           <BlueprintCorners />
           <h2 style={h2Style}>Profile</h2>
-          <p style={bodyStyle}>{user.email} — your sign-in email can&apos;t be changed here.</p>
+          <div style={{ marginTop: 6, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--ink2)' }}>Sign-in email: {user.email}</p>
+            {!showEmailForm && (
+              <button
+                type="button"
+                onClick={() => setShowEmailForm(true)}
+                style={{ background: 'none', border: 0, padding: 0, fontSize: 12.5, color: 'var(--accent-ink)', cursor: 'pointer' }}
+              >
+                Change email
+              </button>
+            )}
+          </div>
+
+          {user.pending_email && (
+            <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--amber, #c9a227)' }}>
+              Confirmation pending for <strong>{user.pending_email}</strong> — check that inbox for a link (expires in 24h).
+            </p>
+          )}
+
+          {showEmailForm && (
+            hasPassword ? (
+              <form onSubmit={handleRequestEmailChange} style={{ marginTop: 12, padding: '12px 14px', border: '1px solid var(--line)', display: 'grid', gap: 10 }}>
+                <label style={{ display: 'grid', gap: 6 }}>
+                  <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink2)' }}>New email</span>
+                  <input
+                    type="email"
+                    required
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="you@newdomain.com"
+                    style={{ height: 34, padding: '0 10px', border: '1px solid var(--line)', background: 'var(--elevated)', color: 'var(--ink)', fontSize: 13, fontFamily: 'var(--font-body-marketing), sans-serif', outline: 'none' }}
+                  />
+                </label>
+                <label style={{ display: 'grid', gap: 6 }}>
+                  <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink2)' }}>Current password</span>
+                  <input
+                    type="password"
+                    required
+                    value={currentPasswordInput}
+                    onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                    placeholder="••••••••"
+                    style={{ height: 34, padding: '0 10px', border: '1px solid var(--line)', background: 'var(--elevated)', color: 'var(--ink)', fontSize: 13, fontFamily: 'var(--font-body-marketing), sans-serif', outline: 'none' }}
+                  />
+                </label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="submit"
+                    disabled={changingEmail}
+                    className="wp-blueprint"
+                    style={{ position: 'relative', height: 32, padding: '0 14px', fontSize: 12.5, fontWeight: 500, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: changingEmail ? 'default' : 'pointer', opacity: changingEmail ? 0.7 : 1 }}
+                  >
+                    <BlueprintCorners />
+                    {changingEmail ? 'Sending…' : 'Send confirmation link'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEmailForm(false);
+                      setNewEmail('');
+                      setCurrentPasswordInput('');
+                    }}
+                    style={{ height: 32, padding: '0 12px', fontSize: 12.5, background: 'transparent', color: 'var(--ink2)', border: '1px solid var(--line)', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <p style={{ marginTop: 10, fontSize: 12.5, color: 'var(--ink3)' }}>
+                Set a password first (below) before changing your email — it&apos;s used to confirm it&apos;s really you.
+              </p>
+            )
+          )}
 
           <form onSubmit={handleSaveProfile} style={{ marginTop: 16, display: 'flex', gap: 16, alignItems: 'flex-start' }}>
             <div
