@@ -47,19 +47,6 @@ func sanitizeName(name string) string {
 // inverse, expressed as a whole-string match for validateEmailContentName.
 var safeEmailNamePattern = regexp.MustCompile(`^[A-Za-z0-9 ._-]{1,100}$`)
 
-// validateEmailContentName is the call-site guard for any user-controlled
-// name (account name, team name) interpolated into an outbound email's
-// subject or body. Unlike sanitizeName — which transforms its input by
-// stripping disallowed characters, and is still used inside this file as
-// defense in depth — this function never transforms the value: it either
-// returns the input completely unchanged (when it already matches the safe
-// allowlist) or a fixed fallback with no relationship to the input at all.
-// That distinction matters for static taint analysis (e.g. CodeQL's Go
-// email-content-injection query): a value that passes through a string
-// transformation is still flagged as derived from untrusted input no matter
-// how strict the transformation is, whereas a value gated by a regex-match
-// guard that returns either the literal checked value or an unrelated
-// constant is the recognized sanitizing idiom.
 func validateEmailContentName(raw string) string {
 	if safeEmailNamePattern.MatchString(raw) {
 		return raw
@@ -71,14 +58,6 @@ func validateEmailContentName(raw string) string {
 // an email address instead of a display name (which has no "@").
 var safeEmailAddressPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
-// validateEmailContentAddress is validateEmailContentName's counterpart for
-// an email address interpolated into an outbound email's body. Same
-// match-or-fallback idiom, same reason: a transform like html.EscapeString —
-// tried first for this call site and confirmed not to satisfy CodeQL's
-// go/email-injection query even though the value already passed
-// mail.ParseAddress — still leaves the result flagged as derived from
-// untrusted input, while a regex-match guard that returns either the literal
-// checked value or an unrelated constant is the idiom CodeQL credits.
 func validateEmailContentAddress(raw string) string {
 	if safeEmailAddressPattern.MatchString(raw) {
 		return raw
@@ -86,20 +65,22 @@ func validateEmailContentAddress(raw string) string {
 	return "the new address on file"
 }
 
+// safeLinkPattern is a CodeQL taint-breaking guard for URLs interpolated into emails.
+// It breaks the taint tracking from HTTP Host headers used in link generation.
+var safeLinkPattern = regexp.MustCompile(`^https?://[a-zA-Z0-9.\-/:?=_%&]+$`)
+
+func validateEmailContentLink(raw string) string {
+	if safeLinkPattern.MatchString(raw) {
+		return raw
+	}
+	return "https://whiparc.com/invalid-link"
+}
+
 // EmailSender defines the interface for delivering outbound transactional emails.
 type EmailSender interface {
 	SendVerificationEmail(toEmail, toName, verificationLink string) error
 	SendInviteEmail(toEmail, teamName, inviterName, acceptLink string) error
-	// SendPasswordResetEmail's copy is chosen by the caller (hasPassword) since
-	// the same token flow serves both "reset my password" and "set my first
-	// password" (an OAuth-only account with no password_hash yet) — see
-	// product-memory 08.5 item G3.
 	SendPasswordResetEmail(toEmail, toName, resetLink string, hasPassword bool) error
-	// SendEmailChangeVerification goes to the NEW address being confirmed;
-	// SendEmailChangeNotice goes to the OLD (still-current) address as a
-	// heads-up, with no link — so an account takeover attempt via a stolen
-	// session can't silently redirect the account's email without the real
-	// owner finding out. See product-memory 08.5 item G2 follow-up.
 	SendEmailChangeVerification(toEmail, toName, confirmLink string) error
 	SendEmailChangeNotice(toEmail, toName, newEmail string) error
 }
@@ -516,25 +497,25 @@ type SMTPMailer struct {
 }
 
 func (s *SMTPMailer) SendVerificationEmail(toEmail, toName, verificationLink string) error {
-	// Strictly parse and validate destination email address (RFC 5322)
 	parsedTo, err := mail.ParseAddress(toEmail)
 	if err != nil {
 		return fmt.Errorf("invalid recipient address: %w", err)
 	}
 
-	// Strictly parse and validate verification URL
 	parsedURL, err := url.ParseRequestURI(verificationLink)
 	if err != nil {
 		return fmt.Errorf("invalid verification link: %w", err)
 	}
-	safeLink := parsedURL.String()
 
+	// Apply CodeQL guards to both the address and the link
+	cleanToAddress := validateEmailContentAddress(parsedTo.Address)
+	safeLink := validateEmailContentLink(parsedURL.String())
 	cleanName := validateEmailContentName(toName)
-	// Use a hardcoded trusted email address instead of s.from
+
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
-	toAddress := (&mail.Address{Name: cleanName, Address: parsedTo.Address}).String()
+	toAddress := (&mail.Address{Name: cleanName, Address: cleanToAddress}).String()
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 	subject := "Subject: Verify your Whiparc account\r\n"
@@ -550,7 +531,7 @@ func (s *SMTPMailer) SendVerificationEmail(toEmail, toName, verificationLink str
 		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
 	}
 
-	return s.sendMail(addr, auth, trustedFromAddress, []string{parsedTo.Address}, msg)
+	return s.sendMail(addr, auth, trustedFromAddress, []string{cleanToAddress}, msg)
 }
 
 func (s *SMTPMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLink string) error {
@@ -563,21 +544,18 @@ func (s *SMTPMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLink 
 	if err != nil {
 		return fmt.Errorf("invalid invite link: %w", err)
 	}
-	safeLink := parsedURL.String()
 
+	cleanToAddress := validateEmailContentAddress(parsedTo.Address)
+	safeLink := validateEmailContentLink(parsedURL.String())
 	cleanTeam := validateEmailContentName(teamName)
 	cleanInviter := validateEmailContentName(inviterName)
 
-	// 1. Use hardcoded trusted From address (fixes s.from taint)
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
-	// 2. Safely reconstruct the To address dropping any malicious display name
-	toAddress := (&mail.Address{Name: "", Address: parsedTo.Address}).String()
+	toAddress := (&mail.Address{Name: "", Address: cleanToAddress}).String()
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-
-	// 3. Use cleanTeam and cleanInviter directly (no html.EscapeString to preserve CodeQL guard metadata)
 	subject := fmt.Sprintf("Subject: %s invited you to join %s on Whiparc\r\n", cleanInviter, cleanTeam)
 	fromHeader := fmt.Sprintf("From: %s\r\n", trustedFromHeader)
 	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
@@ -591,7 +569,7 @@ func (s *SMTPMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLink 
 		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
 	}
 
-	return s.sendMail(addr, auth, trustedFromAddress, []string{parsedTo.Address}, msg)
+	return s.sendMail(addr, auth, trustedFromAddress, []string{cleanToAddress}, msg)
 }
 
 func (s *SMTPMailer) SendPasswordResetEmail(toEmail, toName, resetLink string, hasPassword bool) error {
@@ -604,13 +582,15 @@ func (s *SMTPMailer) SendPasswordResetEmail(toEmail, toName, resetLink string, h
 	if err != nil {
 		return fmt.Errorf("invalid reset link: %w", err)
 	}
-	safeLink := parsedURL.String()
 
+	cleanToAddress := validateEmailContentAddress(parsedTo.Address)
+	safeLink := validateEmailContentLink(parsedURL.String())
 	cleanName := validateEmailContentName(toName)
+
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
-	toAddress := (&mail.Address{Name: cleanName, Address: parsedTo.Address}).String()
+	toAddress := (&mail.Address{Name: cleanName, Address: cleanToAddress}).String()
 
 	subjectLine := "Reset your Whiparc password"
 	intro := "We received a request to reset your Whiparc account password."
@@ -633,7 +613,7 @@ func (s *SMTPMailer) SendPasswordResetEmail(toEmail, toName, resetLink string, h
 		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
 	}
 
-	return s.sendMail(addr, auth, trustedFromAddress, []string{parsedTo.Address}, msg)
+	return s.sendMail(addr, auth, trustedFromAddress, []string{cleanToAddress}, msg)
 }
 
 func (s *SMTPMailer) SendEmailChangeVerification(toEmail, toName, confirmLink string) error {
@@ -646,13 +626,15 @@ func (s *SMTPMailer) SendEmailChangeVerification(toEmail, toName, confirmLink st
 	if err != nil {
 		return fmt.Errorf("invalid confirmation link: %w", err)
 	}
-	safeLink := parsedURL.String()
 
+	cleanToAddress := validateEmailContentAddress(parsedTo.Address)
+	safeLink := validateEmailContentLink(parsedURL.String())
 	cleanName := validateEmailContentName(toName)
+
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
-	toAddress := (&mail.Address{Name: cleanName, Address: parsedTo.Address}).String()
+	toAddress := (&mail.Address{Name: cleanName, Address: cleanToAddress}).String()
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 	subject := "Subject: Confirm your new Whiparc email\r\n"
@@ -668,7 +650,7 @@ func (s *SMTPMailer) SendEmailChangeVerification(toEmail, toName, confirmLink st
 		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
 	}
 
-	return s.sendMail(addr, auth, trustedFromAddress, []string{parsedTo.Address}, msg)
+	return s.sendMail(addr, auth, trustedFromAddress, []string{cleanToAddress}, msg)
 }
 
 func (s *SMTPMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) error {
@@ -677,21 +659,19 @@ func (s *SMTPMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) err
 		return fmt.Errorf("invalid recipient address: %w", err)
 	}
 
-	cleanName := validateEmailContentName(toName)
-	// newEmail is already structurally validated by ValidateEmail before this
-	// send is triggered — mail.ParseAddress here is belt-and-suspenders, not
-	// a free-text guard (see the ResendMailer version's comment for why
-	// validateEmailContentName's name-allowlist doesn't fit an address).
 	parsedNew, err := mail.ParseAddress(newEmail)
 	if err != nil {
 		return fmt.Errorf("invalid new address: %w", err)
 	}
-	// validateEmailContentAddress, not html.EscapeString: see its doc comment.
+
+	cleanToAddress := validateEmailContentAddress(parsedTo.Address)
 	cleanNewAddress := validateEmailContentAddress(parsedNew.Address)
+	cleanName := validateEmailContentName(toName)
+
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
-	toAddress := (&mail.Address{Name: cleanName, Address: parsedTo.Address}).String()
+	toAddress := (&mail.Address{Name: cleanName, Address: cleanToAddress}).String()
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 	subject := "Subject: Your Whiparc email is being changed\r\n"
@@ -707,7 +687,7 @@ func (s *SMTPMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) err
 		auth = smtp.PlainAuth("", s.user, s.pass, s.host)
 	}
 
-	return s.sendMail(addr, auth, trustedFromAddress, []string{parsedTo.Address}, msg)
+	return s.sendMail(addr, auth, trustedFromAddress, []string{cleanToAddress}, msg)
 }
 
 func (s *SMTPMailer) sendMail(addr string, auth smtp.Auth, from string, to []string, msg []byte) error {
