@@ -444,15 +444,15 @@ func (r *ResendMailer) SendEmailChangeVerification(toEmail, toName, confirmLink 
 func (r *ResendMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) error {
 	cleanEmail := sanitizeHeaderField(toEmail)
 	cleanName := validateEmailContentName(toName)
-	// newEmail is an address ValidateEmail already structurally validated
-	// before this send was ever triggered (see handleRequestEmailChange) —
-	// not arbitrary free text, so the header-injection guard is enough here;
-	// validateEmailContentName's allowlist (no "@") is for display names and
-	// would reject every real address.
-	cleanNewEmail := sanitizeHeaderField(newEmail)
+
+	parsedNew, err := mail.ParseAddress(newEmail)
+	if err != nil {
+		return fmt.Errorf("invalid new address: %w", err)
+	}
+	cleanNewAddress := validateEmailContentAddress(parsedNew.Address)
 
 	escapedName := html.EscapeString(cleanName)
-	escapedNewEmail := html.EscapeString(cleanNewEmail)
+	escapedNewEmail := html.EscapeString(cleanNewAddress)
 
 	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
 <html>
@@ -470,7 +470,7 @@ func (r *ResendMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) e
 </body>
 </html>`, escapedName, escapedNewEmail)
 
-	textBody := fmt.Sprintf("Your email is being changed\n\nHi %s, a request was made to change your Whiparc account's email to %s. We've sent a confirmation link there — your email on file only changes once that link is confirmed.\n\nIf you did not request this, contact support.", cleanName, cleanNewEmail)
+	textBody := fmt.Sprintf("Your email is being changed\n\nHi %s, a request was made to change your Whiparc account's email to %s. We've sent a confirmation link there — your email on file only changes once that link is confirmed.\n\nIf you did not request this, contact support.", cleanName, cleanNewAddress)
 
 	payload := map[string]interface{}{
 		"from":    r.from,
