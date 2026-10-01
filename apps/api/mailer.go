@@ -67,6 +67,25 @@ func validateEmailContentName(raw string) string {
 	return "there"
 }
 
+// safeEmailAddressPattern is validateEmailContentName's allowlist, shaped for
+// an email address instead of a display name (which has no "@").
+var safeEmailAddressPattern = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+// validateEmailContentAddress is validateEmailContentName's counterpart for
+// an email address interpolated into an outbound email's body. Same
+// match-or-fallback idiom, same reason: a transform like html.EscapeString —
+// tried first for this call site and confirmed not to satisfy CodeQL's
+// go/email-injection query even though the value already passed
+// mail.ParseAddress — still leaves the result flagged as derived from
+// untrusted input, while a regex-match guard that returns either the literal
+// checked value or an unrelated constant is the idiom CodeQL credits.
+func validateEmailContentAddress(raw string) string {
+	if safeEmailAddressPattern.MatchString(raw) {
+		return raw
+	}
+	return "the new address on file"
+}
+
 // EmailSender defines the interface for delivering outbound transactional emails.
 type EmailSender interface {
 	SendVerificationEmail(toEmail, toName, verificationLink string) error
@@ -667,13 +686,8 @@ func (s *SMTPMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) err
 	if err != nil {
 		return fmt.Errorf("invalid new address: %w", err)
 	}
-	// html.EscapeString is the one sanitizer CodeQL's Go email-content-injection
-	// query actually recognizes (see product-memory 08.5 item E1's saga) — a
-	// custom/structural guard like mail.ParseAddress above isn't credited as
-	// a taint barrier no matter how strict it is. Safe to apply even in a
-	// plain-text body: a value that already parsed as a valid RFC 5322
-	// address contains none of the characters it would touch.
-	escapedNewAddress := html.EscapeString(parsedNew.Address)
+	// validateEmailContentAddress, not html.EscapeString: see its doc comment.
+	cleanNewAddress := validateEmailContentAddress(parsedNew.Address)
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
@@ -684,7 +698,7 @@ func (s *SMTPMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) err
 	fromHeader := fmt.Sprintf("From: %s\r\n", trustedFromHeader)
 	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
 	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
-	body := fmt.Sprintf("A request was made to change your Whiparc account's email to %s. We've sent a confirmation link there — your email on file only changes once that link is confirmed.\r\n\r\nIf you did not request this, please contact support.\r\n", escapedNewAddress)
+	body := fmt.Sprintf("A request was made to change your Whiparc account's email to %s. We've sent a confirmation link there — your email on file only changes once that link is confirmed.\r\n\r\nIf you did not request this, please contact support.\r\n", cleanNewAddress)
 
 	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
 
