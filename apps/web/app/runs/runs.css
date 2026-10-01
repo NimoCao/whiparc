@@ -24,3 +24,16 @@
   outline: none;
   border-color: var(--accent-ink);
 }
+
+.wp-runs-live-dot {
+  animation: wp-runs-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wp-runs-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}

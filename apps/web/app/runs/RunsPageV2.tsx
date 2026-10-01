@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../store/useAuthStore';
 import ProfileMenu from '../components/ProfileMenu';
@@ -10,6 +11,7 @@ import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
 import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon } from '../dashboard/NavIcons';
 import { BrandLogo } from '../components/brand/BrandLogo';
+import { TriggerRunModal } from '../components/TriggerRunModal';
 import type { PipelineRun, RunRow } from '../lib/types';
 import { useAggregatedRuns } from '../lib/useAggregatedRuns';
 import '../components/ui/blueprint.css';
@@ -62,13 +64,14 @@ function formatDuration(startIso: string, endIso: string): string {
 export default function RunsPageV2() {
   const { user, token, hasHydrated } = useAuthStore();
   const isLoggedIn = hasHydrated && !!user;
+  const router = useRouter();
 
   const [theme, setTheme] = useState<Theme>('dark');
   const { runs, isLoading, error: loadError } = useAggregatedRuns(token);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [logsRun, setLogsRun] = useState<RunRow | null>(null);
-  const [showTriggerNote, setShowTriggerNote] = useState(false);
+  const [showTriggerModal, setShowTriggerModal] = useState(false);
 
   // Captured once (not read fresh inside the memo below, which must stay a
   // pure function of its dependency array) — good enough for a stats panel
@@ -182,9 +185,10 @@ export default function RunsPageV2() {
             </button>
             <button
               type="button"
-              onClick={() => setShowTriggerNote(true)}
+              onClick={() => setShowTriggerModal(true)}
+              disabled={!isLoggedIn}
               className="wp-blueprint wp-runs-submit"
-              style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}
+              style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13.5, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: isLoggedIn ? 'pointer' : 'not-allowed', opacity: isLoggedIn ? 1 : 0.6 }}
             >
               <Icon icon="lucide:play" width={12} />
               Trigger run
@@ -197,11 +201,6 @@ export default function RunsPageV2() {
           <div>
             <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 'clamp(26px,3vw,34px)', lineHeight: 1.1, color: 'var(--ink)' }}>Runs</h1>
             <p style={{ margin: '5px 0 0', fontSize: 14.5, color: 'var(--ink2)' }}>Every plan, apply, and destroy across your projects.</p>
-            {showTriggerNote && (
-              <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--amber)', background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid var(--amber)', padding: '6px 10px', width: 'fit-content' }}>
-                Triggering a run needs a specific project&apos;s canvas — open a project&apos;s workspace and deploy from there for now.
-              </p>
-            )}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 14 }}>
@@ -268,7 +267,11 @@ export default function RunsPageV2() {
                 <tbody>
                   {visibleRuns.map((run) => (
                     <tr key={run.id} className="wp-runs-row">
-                      <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink)' }}>{run.id.slice(0, 10)}</td>
+                      <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12 }}>
+                        <Link href={`/runs/${run.id}`} className="wp-runs-navlink" style={{ color: 'var(--ink)' }}>
+                          {run.id.slice(0, 10)}
+                        </Link>
+                      </td>
                       <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', color: 'var(--ink)' }}>{run.projectName}</td>
                       <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink3)' }}>{run.runType?.toLowerCase() ?? '—'}</td>
                       <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', fontFamily: 'var(--font-mono-marketing)', fontSize: 12, color: 'var(--ink3)' }}>{run.target ?? '—'}</td>
@@ -281,9 +284,15 @@ export default function RunsPageV2() {
                         </span>
                       </td>
                       <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--line)', textAlign: 'right' }}>
-                        <button type="button" onClick={() => setLogsRun(run)} className="wp-runs-navlink" style={{ fontSize: 12.5, color: 'var(--accent-ink)', background: 'none', border: 0, cursor: 'pointer' }}>
-                          View logs
-                        </button>
+                        {run.status === 'RUNNING' || run.status === 'PENDING' ? (
+                          <Link href={`/runs/${run.id}`} className="wp-runs-navlink" style={{ fontSize: 12.5, color: 'var(--accent-ink)' }}>
+                            Watch live
+                          </Link>
+                        ) : (
+                          <button type="button" onClick={() => setLogsRun(run)} className="wp-runs-navlink" style={{ fontSize: 12.5, color: 'var(--accent-ink)', background: 'none', border: 0, cursor: 'pointer' }}>
+                            View logs
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -324,6 +333,18 @@ export default function RunsPageV2() {
             </pre>
           </div>
         </div>
+      )}
+
+      {showTriggerModal && token && (
+        <TriggerRunModal
+          isOpen={showTriggerModal}
+          onClose={() => setShowTriggerModal(false)}
+          token={token}
+          onTriggered={(runId) => {
+            setShowTriggerModal(false);
+            router.push(`/runs/${runId}`);
+          }}
+        />
       )}
     </div>
   );

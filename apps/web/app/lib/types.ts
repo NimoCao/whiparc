@@ -56,6 +56,7 @@ export interface TemplateListResponse {
 // plausible-looking values.
 export interface PipelineRun {
   id: string;
+  projectId?: string | null;
   status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
   logs: string;
   canvas: string;
