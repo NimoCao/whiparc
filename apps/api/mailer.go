@@ -515,7 +515,7 @@ func (s *SMTPMailer) SendVerificationEmail(toEmail, toName, verificationLink str
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
-	toAddress := (&mail.Address{Name: cleanName, Address: cleanToAddress}).String()
+	toAddress := "\"" + cleanName + "\" <" + cleanToAddress + ">"
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 	subject := "Subject: Verify your Whiparc account\r\n"
@@ -553,7 +553,7 @@ func (s *SMTPMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLink 
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
-	toAddress := (&mail.Address{Name: "", Address: cleanToAddress}).String()
+	toAddress := cleanToAddress
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 	subject := fmt.Sprintf("Subject: %s invited you to join %s on Whiparc\r\n", cleanInviter, cleanTeam)
@@ -590,7 +590,7 @@ func (s *SMTPMailer) SendPasswordResetEmail(toEmail, toName, resetLink string, h
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
-	toAddress := (&mail.Address{Name: cleanName, Address: cleanToAddress}).String()
+	toAddress := "\"" + cleanName + "\" <" + cleanToAddress + ">"
 
 	subjectLine := "Reset your Whiparc password"
 	intro := "We received a request to reset your Whiparc account password."
@@ -634,7 +634,7 @@ func (s *SMTPMailer) SendEmailChangeVerification(toEmail, toName, confirmLink st
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
-	toAddress := (&mail.Address{Name: cleanName, Address: cleanToAddress}).String()
+	toAddress := "\"" + cleanName + "\" <" + cleanToAddress + ">"
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 	subject := "Subject: Confirm your new Whiparc email\r\n"
@@ -671,7 +671,7 @@ func (s *SMTPMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) err
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
-	toAddress := (&mail.Address{Name: cleanName, Address: cleanToAddress}).String()
+	toAddress := "\"" + cleanName + "\" <" + cleanToAddress + ">"
 
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 	subject := "Subject: Your Whiparc email is being changed\r\n"
