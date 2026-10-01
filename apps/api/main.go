@@ -115,6 +115,13 @@ func nullIfEmpty(s string) interface{} {
 	return s
 }
 
+func nonEmptyOr(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
+
 type RunTracker struct {
 	sync.Mutex
 	clients      map[*websocket.Conn]bool
@@ -124,15 +131,17 @@ type RunTracker struct {
 }
 
 var (
-	db            *dbHandle
-	dbBackend     string // "sqlite" (default) or "postgres" — set once in main()
-	upgrader      = websocket.Upgrader{CheckOrigin: checkWebsocketOrigin}
-	trackers      = make(map[string]*RunTracker)
-	trackersMutex sync.Mutex
-	emailSender   EmailSender
-	signupLimiter *RateLimiter
-	loginLimiter  *RateLimiter
-	resendLimiter *RateLimiter
+	db                 *dbHandle
+	dbBackend          string // "sqlite" (default) or "postgres" — set once in main()
+	upgrader           = websocket.Upgrader{CheckOrigin: checkWebsocketOrigin}
+	trackers           = make(map[string]*RunTracker)
+	trackersMutex      sync.Mutex
+	emailSender        EmailSender
+	signupLimiter      *RateLimiter
+	loginLimiter       *RateLimiter
+	resendLimiter      *RateLimiter
+	forgotLimiter      *RateLimiter
+	emailChangeLimiter *RateLimiter
 )
 
 // waitForPostgres retries the initial ping instead of failing on first
@@ -273,9 +282,11 @@ func main() {
 
 	// Initialize mailer and rate limiters
 	emailSender = NewEmailSender()
-	signupLimiter = NewRateLimiter(5, 1*time.Hour, 5)       // 5 signups per hour per IP
-	loginLimiter = NewRateLimiter(10, 15*time.Minute, 10)   // 10 logins per 15 min per IP
-	resendLimiter = NewRateLimiter(3, 15*time.Minute, 3)    // 3 resends per 15 min per user/IP
+	signupLimiter = NewRateLimiter(5, 1*time.Hour, 5)         // 5 signups per hour per IP
+	loginLimiter = NewRateLimiter(10, 15*time.Minute, 10)     // 10 logins per 15 min per IP
+	resendLimiter = NewRateLimiter(3, 15*time.Minute, 3)      // 3 resends per 15 min per user/IP
+	forgotLimiter = NewRateLimiter(5, 15*time.Minute, 5)      // 5 forgot-password requests per 15 min per IP
+	emailChangeLimiter = NewRateLimiter(5, 15*time.Minute, 5) // 5 email-change requests per 15 min per user
 
 	// Set up routing
 	mux := http.NewServeMux()
@@ -299,7 +310,21 @@ func main() {
 	mux.Handle("POST /api/auth/resend-verification", AuthMiddleware(http.HandlerFunc(handleResendVerification)))
 	mux.Handle("POST /api/auth/upgrade", AuthMiddleware(http.HandlerFunc(handleUpgradePlan)))
 	mux.Handle("GET /api/auth/me", AuthMiddleware(http.HandlerFunc(handleMe)))
+	mux.Handle("PATCH /api/auth/profile", AuthMiddleware(http.HandlerFunc(handleUpdateProfile)))
 	mux.Handle("PATCH /api/auth/onboarding", AuthMiddleware(http.HandlerFunc(handleDismissOnboarding)))
+	mux.HandleFunc("POST /api/auth/forgot", enableCORS(handleForgotPassword))
+	// Deliberately not GET /api/auth/reset/{token} — that collides with
+	// GET /api/auth/{provider}/login as an ambiguous pattern from Go's
+	// net/http ServeMux (both wildcards at the same segment position, e.g.
+	// "/api/auth/reset/login" matches either shape).
+	mux.HandleFunc("GET /api/auth/reset/check/{token}", enableCORS(handleCheckResetToken))
+	mux.HandleFunc("POST /api/auth/reset", enableCORS(handleResetPassword))
+	mux.Handle("POST /api/auth/password/request-reset", AuthMiddleware(http.HandlerFunc(handleRequestPasswordReset)))
+	mux.Handle("GET /api/auth/identities", AuthMiddleware(http.HandlerFunc(handleGetIdentities)))
+	mux.Handle("DELETE /api/auth/identities/{provider}", AuthMiddleware(http.HandlerFunc(handleUnlinkIdentity)))
+	mux.Handle("POST /api/auth/link-ticket", AuthMiddleware(http.HandlerFunc(handleCreateLinkTicket)))
+	mux.Handle("POST /api/auth/email/change", AuthMiddleware(http.HandlerFunc(handleRequestEmailChange)))
+	mux.HandleFunc("POST /api/auth/email/confirm", enableCORS(handleConfirmEmailChange))
 	mux.Handle("GET /api/activity", AuthMiddleware(http.HandlerFunc(handleGetActivity)))
 	mux.HandleFunc("GET /api/auth/{provider}/login", handleOAuthLogin)
 	mux.HandleFunc("GET /api/auth/{provider}/callback", handleOAuthCallback)
@@ -329,6 +354,8 @@ func main() {
 	mux.Handle("PATCH /api/projects/{id}/unarchive", AuthMiddleware(RequireProjectRole("ADMIN")(http.HandlerFunc(handleUnarchiveProject))))
 	mux.Handle("GET /api/projects/{id}/canvas", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetCanvasState))))
 	mux.Handle("PUT /api/projects/{id}/canvas", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleUpdateCanvasState))))
+	mux.Handle("GET /api/projects/{id}/snapshots", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetSnapshots))))
+	mux.Handle("POST /api/projects/{id}/snapshots/{snapshotId}/revert", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleRevertSnapshot))))
 	mux.Handle("POST /api/projects/{id}/import", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleImport))))
 	mux.Handle("GET /api/projects/{id}/credentials", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetProjectCredentials))))
 	mux.Handle("POST /api/projects/{id}/credentials", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleCreateProjectCredential))))
@@ -645,13 +672,13 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		canvasStr = string(canvasBytes)
-		
+
 		var canvasStruct struct {
 			Nodes []importer.CanvasNode `json:"nodes"`
 			Edges []importer.CanvasEdge `json:"edges"`
 		}
 		_ = json.Unmarshal(canvasBytes, &canvasStruct)
-		
+
 		if len(payload.Files) == 0 {
 			compiledFiles, err := importer.CompileCanvas(canvasStruct.Nodes, canvasStruct.Edges)
 			if err == nil {
@@ -804,6 +831,7 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 
 			if finalStatus == "SUCCESS" {
 				insertActivityEvent(projectID, user.ID, "deploy.succeeded", map[string]interface{}{"target": target})
+				insertCanvasSnapshot(projectID, user.ID, canvasStr, "Deploy to "+nonEmptyOr(target, "sandbox"))
 			} else if finalStatus == "FAILED" {
 				insertActivityEvent(projectID, user.ID, "deploy.failed", map[string]interface{}{"target": target})
 			}
@@ -1276,6 +1304,7 @@ func handleDestroy(w http.ResponseWriter, r *http.Request) {
 
 			if finalStatus == "SUCCESS" {
 				insertActivityEvent(projectID, user.ID, "destroy.succeeded", map[string]interface{}{"target": target})
+				insertCanvasSnapshot(projectID, user.ID, canvasStr, "Destroy from "+nonEmptyOr(target, "sandbox"))
 			} else if finalStatus == "FAILED" {
 				insertActivityEvent(projectID, user.ID, "destroy.failed", map[string]interface{}{"target": target})
 			}
@@ -1810,13 +1839,13 @@ func handleWorkspaceWebSocketSync(w http.ResponseWriter, r *http.Request) {
 
 	room.Lock()
 	room.clients[conn] = client
-	
+
 	// Create active users user list to send back as an initialization
 	activeUsersList := make([]map[string]string, 0)
 	for _, c := range room.clients {
 		activeUsersList = append(activeUsersList, map[string]string{
-			"id":   c.userID,
-			"name": c.userName,
+			"id":    c.userID,
+			"name":  c.userName,
 			"color": c.color,
 		})
 	}
@@ -1871,13 +1900,13 @@ func handleWorkspaceWebSocketSync(w http.ResponseWriter, r *http.Request) {
 	// Unregister client
 	room.Lock()
 	delete(room.clients, conn)
-	
+
 	// Re-compile active users user list post-exit
 	remainingUsers := make([]map[string]string, 0)
 	for _, c := range room.clients {
 		remainingUsers = append(remainingUsers, map[string]string{
-			"id":   c.userID,
-			"name": c.userName,
+			"id":    c.userID,
+			"name":  c.userName,
 			"color": c.color,
 		})
 	}
@@ -2237,5 +2266,3 @@ func migrateCloudCredentialsProviderGithub() error {
 	log.Println("[DB] Migrated cloud_credentials provider check constraint to allow 'GITHUB'")
 	return tx.Commit()
 }
-
-

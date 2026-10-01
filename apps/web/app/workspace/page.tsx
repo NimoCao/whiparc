@@ -27,6 +27,7 @@ import BlueprintEdge from '../components/canvas/BlueprintEdge';
 import EdgeInspector from '../components/canvas/EdgeInspector';
 import CustomNodeModal from '../components/CustomNodeModal';
 import { ProjectSettingsModal } from '../components/ProjectSettingsModal';
+import { SnapshotHistoryDrawer } from '../components/SnapshotHistoryDrawer';
 import { InputWithVariablePicker } from '../components/VariablePicker';
 import EmailVerificationBanner from '../components/EmailVerificationBanner';
 import { generateAnsibleYAML } from '../lib/exportYaml';
@@ -3028,6 +3029,7 @@ function WorkspaceContent() {
   const [, setPeerEdits] = useState<Record<string, string>>({}); // maps nodeId -> userName editing it
   const [projectDetails, setProjectDetails] = useState<Project | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isCustomNodeOpen, setIsCustomNodeOpen] = useState(false);
   const [availableCredentials, setAvailableCredentials] = useState<Credential[]>([]);
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
@@ -3228,6 +3230,31 @@ function WorkspaceContent() {
 
     loadProjectAndCanvas();
   }, [projectId, user, setViewport, setNodes, setEdges, setVersion, setSaveStatus, setCustomLibraryNodes, setProjectId, token]);
+
+  // Re-fetches just the canvas half of loadProjectAndCanvas above, after a
+  // snapshot revert (SnapshotHistoryDrawer) has already rewritten
+  // canvas_states server-side — pulls in the reverted nodes/edges/version
+  // rather than trusting the revert response's own copy, so this stays
+  // correct even if something else changed canvas_states in between.
+  // Deliberately doesn't touch viewport — a revert restores content, not
+  // camera position.
+  const handleSnapshotReverted = useCallback(async () => {
+    if (!projectId || !token) return;
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+    try {
+      const canvasRes = await fetch(`${API_URL}/api/projects/${projectId}/canvas`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!canvasRes.ok) return;
+      const state = await canvasRes.json();
+      isIncomingSyncRef.current = true;
+      setNodes(JSON.parse(state.nodes_json || '[]'));
+      setEdges(JSON.parse(state.edges_json || '[]'));
+      setVersion(state.version || 1);
+    } catch (err) {
+      console.warn('Failed to reload canvas after revert', err);
+    }
+  }, [projectId, token, setNodes, setEdges, setVersion]);
 
   // Poll the paired Sandbox Agent's connection status (see
   // obsidian_memory/08.4's Phase 2 heartbeat/daemon-install entries) so a
@@ -3888,6 +3915,7 @@ function WorkspaceContent() {
         isSyncConnected={isSyncConnected}
         saveStatus={saveStatus}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenHistory={() => setIsHistoryOpen(true)}
         agentStatus={agentStatus}
         migrationStatus={migrationStatus}
       />
@@ -3996,6 +4024,14 @@ function WorkspaceContent() {
         isOpen={isCustomNodeOpen}
         onClose={() => setIsCustomNodeOpen(false)}
         projectId={projectId}
+      />
+
+      <SnapshotHistoryDrawer
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        projectId={projectId}
+        token={token}
+        onReverted={handleSnapshotReverted}
       />
     </div>
   );

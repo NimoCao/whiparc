@@ -9,10 +9,9 @@ import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { BrandLogo } from '../components/brand/BrandLogo';
+import { buildOAuthLoginUrl, resolvePostAuthPath } from '../lib/oauthRedirect';
 import '../components/ui/blueprint.css';
 import './login.css';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 const labelStyle: CSSProperties = {
   fontFamily: 'var(--font-mono-marketing)',
@@ -111,36 +110,14 @@ export function LoginPageV2() {
     if (success) await continueAfterAuth();
   };
 
-  // Resumes whatever the user was trying to do before being sent here.
-  // `redirect=/templates/{id}` is the one continuation that needs real work
-  // (forking the template can't happen until we have a token, which we only
-  // get here) — anything else is just a plain post-login destination.
+  // Resumes whatever the user was trying to do before being sent here —
+  // shared with the OAuth callback page so this continuation (including the
+  // /templates/{id} fork special case) works the same way regardless of
+  // which sign-in path was used.
   const continueAfterAuth = async () => {
     const redirect = searchParams.get('redirect');
-    const templateMatch = redirect?.match(/^\/templates\/([\w-]+)$/);
-
-    if (templateMatch) {
-      const templateId = templateMatch[1];
-      try {
-        const token = useAuthStore.getState().token;
-        const res = await fetch(`${API_URL}/api/templates/${templateId}/use`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data: { project_id: string } = await res.json();
-          router.push(`/workspace?project=${data.project_id}`);
-          return;
-        }
-      } catch {
-        // fall through — land back on the template page rather than lose
-        // the user's place if the fork call itself failed
-      }
-      router.push(redirect!);
-      return;
-    }
-
-    router.push(redirect || '/dashboard');
+    const token = useAuthStore.getState().token ?? '';
+    router.push(await resolvePostAuthPath(redirect, token));
   };
 
   const toggleMode = () => router.push(withRedirect(isSignUp ? '/login' : '/login?mode=signup'));
@@ -269,9 +246,9 @@ export function LoginPageV2() {
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
                 <span style={labelStyle}>Password</span>
                 {!isSignUp && (
-                  <a href="#" onClick={(e) => e.preventDefault()} className="wp-login-forgot" style={{ fontSize: 11.5, color: 'var(--accent-ink)' }}>
+                  <Link href="/forgot-password" className="wp-login-forgot" style={{ fontSize: 11.5, color: 'var(--accent-ink)' }}>
                     Forgot?
-                  </a>
+                  </Link>
                 )}
               </div>
               <input
@@ -319,7 +296,7 @@ export function LoginPageV2() {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <a
-              href={`${API_URL}/api/auth/github/login`}
+              href={buildOAuthLoginUrl('github', searchParams.get('redirect'))}
               className="wp-login-oauth"
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: 42, border: '1px solid var(--line)', color: 'var(--ink)', fontSize: 13.5 }}
             >
@@ -327,7 +304,7 @@ export function LoginPageV2() {
               GitHub
             </a>
             <a
-              href={`${API_URL}/api/auth/google/login`}
+              href={buildOAuthLoginUrl('google', searchParams.get('redirect'))}
               className="wp-login-oauth"
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: 42, border: '1px solid var(--line)', color: 'var(--ink)', fontSize: 13.5 }}
             >

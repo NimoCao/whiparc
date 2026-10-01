@@ -173,6 +173,83 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     8,
+		description: "add_password_resets_table",
+		up: func(tx sqlExecer) error {
+			// token_hash, never the raw token (08.5 item G3's explicit spec) —
+			// same reasoning as any credential secret in this app: a DB read
+			// (backup, replica, compromised query) must not hand out something
+			// directly usable to reset an account's password. used_at is
+			// nullable rather than a DELETE-on-use so there's an audit trail;
+			// single-use is enforced by checking used_at IS NULL at lookup time.
+			ddl := `CREATE TABLE password_resets (
+				id TEXT PRIMARY KEY,
+				user_id TEXT NOT NULL,
+				token_hash TEXT NOT NULL,
+				expires_at DATETIME NOT NULL,
+				used_at DATETIME,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+			)`
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to create password_resets: %w", err)
+			}
+			if _, err := tx.Exec("CREATE INDEX idx_password_resets_token_hash ON password_resets(token_hash)"); err != nil {
+				return fmt.Errorf("failed to create password_resets token_hash index: %w", err)
+			}
+			if _, err := tx.Exec("CREATE INDEX idx_password_resets_user_id ON password_resets(user_id)"); err != nil {
+				return fmt.Errorf("failed to create password_resets user_id index: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		version:     9,
+		description: "add_avatar_url_to_users",
+		up: func(tx sqlExecer) error {
+			// Nullable, no default: NULL means "no avatar set" (every existing
+			// row), every UI spot that renders it falls back to initials. Plain
+			// TEXT needs no DATETIME/pgSchema dance (that's only for date/time
+			// columns — see migration 2's verification_expires_at comment).
+			if _, err := tx.Exec("ALTER TABLE users ADD COLUMN avatar_url TEXT"); err != nil {
+				return fmt.Errorf("failed to add avatar_url: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		version:     10,
+		description: "add_pending_email_change_to_users",
+		up: func(tx sqlExecer) error {
+			// Columns on `users`, not a separate table like password_resets —
+			// there's only ever one *live* pending change per account (a new
+			// request overwrites the old one), so there's no history worth
+			// keeping and no separate single-use/audit bookkeeping needed the
+			// way password_resets' used_at provides. token_hash follows the
+			// same "never store the raw token" reasoning as password_resets.
+			if _, err := tx.Exec("ALTER TABLE users ADD COLUMN pending_email TEXT"); err != nil {
+				return fmt.Errorf("failed to add pending_email: %w", err)
+			}
+			if _, err := tx.Exec("ALTER TABLE users ADD COLUMN pending_email_token_hash TEXT"); err != nil {
+				return fmt.Errorf("failed to add pending_email_token_hash: %w", err)
+			}
+			ddl := "ALTER TABLE users ADD COLUMN pending_email_expires_at DATETIME"
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to add pending_email_expires_at: %w", err)
+			}
+			if _, err := tx.Exec("CREATE INDEX idx_users_pending_email_token_hash ON users(pending_email_token_hash)"); err != nil {
+				return fmt.Errorf("failed to create pending_email_token_hash index: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

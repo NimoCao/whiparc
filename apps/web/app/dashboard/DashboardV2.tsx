@@ -13,7 +13,7 @@ import EmailVerificationBanner from '../components/EmailVerificationBanner';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
-import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon } from './NavIcons';
+import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, ShieldIcon, BookIcon } from './NavIcons';
 import { BrandLogo } from '../components/brand/BrandLogo';
 import type { ActivityEvent, Project, RunRow, Team } from '../lib/types';
 import { useAggregatedRuns } from '../lib/useAggregatedRuns';
@@ -43,6 +43,7 @@ const NAV_ITEMS: { key: string; label: string; href: string; icon: React.ReactNo
   { key: 'runs', label: 'Runs', href: '/runs', icon: <ActivityIcon /> },
   { key: 'credentials', label: 'Credentials', href: '/credentials', icon: <LockIcon /> },
   { key: 'team', label: 'Team', href: '/team', icon: <UsersIcon /> },
+  { key: 'account', label: 'Account', href: '/account', icon: <ShieldIcon /> },
   { key: 'docs', label: 'Docs', href: '/docs', icon: <BookIcon /> },
 ];
 

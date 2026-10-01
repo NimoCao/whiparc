@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../../store/useAuthStore';
+import { resolvePostAuthPath } from '../../lib/oauthRedirect';
 
 // Receives the JWT the backend's OAuth callback (apps/api/oauth.go) hands off
 // after a successful Google/GitHub sign-in. The token arrives in the URL
@@ -20,6 +21,7 @@ export default function OAuthCallbackPage() {
     const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
     const params = new URLSearchParams(hash);
     const token = params.get('token');
+    const redirect = params.get('redirect');
 
     if (!token || !setSessionFromToken(token)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -27,7 +29,13 @@ export default function OAuthCallbackPage() {
       return;
     }
 
-    router.replace('/dashboard');
+    let cancelled = false;
+    resolvePostAuthPath(redirect, token).then((path) => {
+      if (!cancelled) router.replace(path);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router, setSessionFromToken]);
 
   return (

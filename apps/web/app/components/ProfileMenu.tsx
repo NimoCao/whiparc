@@ -33,6 +33,7 @@ export default function ProfileMenu({ variant = 'default', blueprint = false }: 
   const router = useRouter();
   const { user, hasHydrated, logout } = useAuthStore();
   const [open, setOpen] = useState(false);
+  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -106,9 +107,15 @@ export default function ProfileMenu({ variant = 'default', blueprint = false }: 
               fontFamily: 'var(--font-display, inherit)',
               background: 'var(--accent)',
               color: 'var(--on-accent)',
+              overflow: 'hidden',
             }}
           >
-            {user.name.slice(0, 2)}
+            {user.avatar_url && !avatarLoadFailed ? (
+              // eslint-disable-next-line @next/next/no-img-element -- an arbitrary externally-pasted URL, not an optimizable local/remote asset Next's Image loader is configured for
+              <img src={user.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={() => setAvatarLoadFailed(true)} />
+            ) : (
+              user.name.slice(0, 2)
+            )}
           </div>
           <Icon
             icon="lucide:chevron-down"
@@ -139,6 +146,10 @@ export default function ProfileMenu({ variant = 'default', blueprint = false }: 
                 <Icon icon="lucide:layout-dashboard" width={12} style={{ color: 'var(--ink3)' }} />
                 Dashboard
               </Link>
+              <Link href="/account" onClick={() => setOpen(false)} className="wp-ws-navlink" style={blueprintMenuItemStyle}>
+                <Icon icon="lucide:shield-check" width={12} style={{ color: 'var(--ink3)' }} />
+                Account
+              </Link>
 
               <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
 
@@ -160,8 +171,13 @@ export default function ProfileMenu({ variant = 'default', blueprint = false }: 
         className="flex items-center gap-2 px-2 py-1.5 rounded-xl border border-border bg-card/60 hover:bg-card transition-colors cursor-pointer"
         title={user.name}
       >
-        <div className="h-7 w-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold uppercase border border-primary/20 flex-shrink-0">
-          {user.name.slice(0, 2)}
+        <div className="h-7 w-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold uppercase border border-primary/20 flex-shrink-0 overflow-hidden">
+          {user.avatar_url && !avatarLoadFailed ? (
+            // eslint-disable-next-line @next/next/no-img-element -- an arbitrary externally-pasted URL, not an optimizable local/remote asset Next's Image loader is configured for
+            <img src={user.avatar_url} alt="" className="h-full w-full object-cover" onError={() => setAvatarLoadFailed(true)} />
+          ) : (
+            user.name.slice(0, 2)
+          )}
         </div>
         <Icon icon="lucide:chevron-down" className={clsx("text-xs text-muted-foreground transition-transform hidden sm:block", open && "rotate-180")} />
       </button>
@@ -188,6 +204,14 @@ export default function ProfileMenu({ variant = 'default', blueprint = false }: 
             >
               <Icon icon="lucide:layout-dashboard" className="text-base text-muted-foreground" />
               Dashboard
+            </Link>
+            <Link
+              href="/account"
+              onClick={() => setOpen(false)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg text-foreground hover:bg-muted transition-colors"
+            >
+              <Icon icon="lucide:shield-check" className="text-base text-muted-foreground" />
+              Account
             </Link>
           </div>
           <div className="p-1 border-t border-border">

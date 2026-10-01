@@ -8,6 +8,12 @@ interface User {
   plan: string;
   email_verified: boolean;
   onboarding_dismissed: boolean;
+  // Not carried in the JWT (unlike name) — starts empty until the first
+  // fetchMe() refresh, same reasoning as onboarding_dismissed below.
+  avatar_url: string;
+  // Non-empty while a requested email change is awaiting confirmation (the
+  // link was sent to this address, but `email` above hasn't changed yet).
+  pending_email: string;
 }
 
 interface AuthState {
@@ -32,6 +38,9 @@ interface AuthState {
   logout: () => void;
   clearError: () => void;
   upgradePlan: (newPlan: string) => Promise<boolean>;
+  updateProfile: (payload: { name?: string; avatar_url?: string }) => Promise<{ success: boolean; error?: string }>;
+  requestEmailChange: (newEmail: string, currentPassword: string) => Promise<{ success: boolean; message?: string; error?: string }>;
+  confirmEmailChange: (token: string) => Promise<{ success: boolean; email?: string; error?: string }>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -67,6 +76,8 @@ function decodeTokenClaims(token: string): User | null {
       email_verified: claims.email_verified ?? false,
       // Not carried in the JWT — refreshed by the fetchMe() call setSessionFromToken triggers below.
       onboarding_dismissed: false,
+      avatar_url: '',
+      pending_email: '',
     };
   } catch {
     return null;
@@ -230,6 +241,8 @@ export const useAuthStore = create<AuthState>()(
             plan: data.plan || data.user?.plan || 'FREE',
             email_verified: Boolean(data.email_verified ?? data.user?.email_verified),
             onboarding_dismissed: Boolean(data.onboarding_dismissed ?? data.user?.onboarding_dismissed),
+            avatar_url: data.avatar_url || data.user?.avatar_url || '',
+            pending_email: data.pending_email || data.user?.pending_email || '',
           };
           set({ user: fetchedUser });
           return fetchedUser;
@@ -294,6 +307,80 @@ export const useAuthStore = create<AuthState>()(
         } catch (err: unknown) {
           console.error("Upgrade error", err);
           return false;
+        }
+      },
+
+      updateProfile: async (payload) => {
+        const token = get().token;
+        if (!token) return { success: false, error: 'Please sign in first.' };
+        try {
+          const res = await fetch(`${API_URL}/api/auth/profile`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || 'Failed to update profile');
+          }
+          const data = await res.json();
+          set({ token: data.token, user: data.user });
+          return { success: true };
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Failed to update profile';
+          return { success: false, error: msg };
+        }
+      },
+
+      requestEmailChange: async (newEmail, currentPassword) => {
+        const token = get().token;
+        if (!token) return { success: false, error: 'Please sign in first.' };
+        try {
+          const res = await fetch(`${API_URL}/api/auth/email/change`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ newEmail, currentPassword }),
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || 'Failed to request an email change');
+          }
+          const data: { message?: string } = await res.json();
+          // Refresh pending_email so the UI shows the "confirmation pending"
+          // state immediately without waiting for the next natural fetchMe().
+          void get().fetchMe();
+          return { success: true, message: data.message };
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Failed to request an email change';
+          return { success: false, error: msg };
+        }
+      },
+
+      confirmEmailChange: async (token) => {
+        try {
+          const res = await fetch(`${API_URL}/api/auth/email/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || 'Failed to confirm the email change');
+          }
+          const data = await res.json();
+          if (data.token && data.user) {
+            set({ token: data.token, user: data.user });
+          }
+          return { success: true, email: data.user?.email };
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Failed to confirm the email change';
+          return { success: false, error: msg };
         }
       },
     }),
