@@ -667,6 +667,13 @@ func (s *SMTPMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) err
 	if err != nil {
 		return fmt.Errorf("invalid new address: %w", err)
 	}
+	// html.EscapeString is the one sanitizer CodeQL's Go email-content-injection
+	// query actually recognizes (see product-memory 08.5 item E1's saga) — a
+	// custom/structural guard like mail.ParseAddress above isn't credited as
+	// a taint barrier no matter how strict it is. Safe to apply even in a
+	// plain-text body: a value that already parsed as a valid RFC 5322
+	// address contains none of the characters it would touch.
+	escapedNewAddress := html.EscapeString(parsedNew.Address)
 	const trustedFromAddress = "noreply@whiparc.com"
 	const trustedFromHeader = "Whiparc Team <noreply@whiparc.com>"
 
@@ -677,7 +684,7 @@ func (s *SMTPMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) err
 	fromHeader := fmt.Sprintf("From: %s\r\n", trustedFromHeader)
 	toHeader := fmt.Sprintf("To: %s\r\n", toAddress)
 	mimeHeader := "MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n"
-	body := fmt.Sprintf("A request was made to change your Whiparc account's email to %s. We've sent a confirmation link there — your email on file only changes once that link is confirmed.\r\n\r\nIf you did not request this, please contact support.\r\n", parsedNew.Address)
+	body := fmt.Sprintf("A request was made to change your Whiparc account's email to %s. We've sent a confirmation link there — your email on file only changes once that link is confirmed.\r\n\r\nIf you did not request this, please contact support.\r\n", escapedNewAddress)
 
 	msg := []byte(fromHeader + toHeader + subject + mimeHeader + body)
 
