@@ -71,11 +71,13 @@ export function LoginPageV2() {
     const noticeParam = searchParams.get('notice');
     if (noticeParam === 'exists') {
       setNotice('You already have an account with this email — sign in below.');
-      const prefillEmail = searchParams.get('email');
-      if (prefillEmail) setEmail(prefillEmail);
     } else {
       setNotice(null);
     }
+    // Any flow that already knows the address (an invite link, the
+    // already-registered bounce above) can prefill it.
+    const prefillEmail = searchParams.get('email');
+    if (prefillEmail) setEmail(prefillEmail);
   }, [searchParams, clearError]);
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -446,11 +446,56 @@ func handleRevokeTeamInvite(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Invite revoked"})
 }
 
+// GET /api/invites/{token}/preview — public (the recipient may not have an
+// account yet, so there's no session to authenticate). Possession of the
+// unguessable token (sent only to the invited address) is the credential;
+// the response lets the accept page say *what* is being offered and prefill
+// the invited email into sign-in/sign-up, instead of a bare "sign in".
+func handleInvitePreview(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+
+	var teamName, inviterName, email, role, status string
+	var expiresAt time.Time
+	err := db.QueryRow(`
+		SELECT t.name, u.name, i.email, i.role, i.status, i.expires_at
+		FROM invitations i
+		JOIN teams t ON i.team_id = t.id
+		JOIN users u ON i.invited_by = u.id
+		WHERE i.token = ?`, token).Scan(&teamName, &inviterName, &email, &role, &status, &expiresAt)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Invite not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"team_name":       teamName,
+		"invited_by_name": inviterName,
+		"email":           email,
+		"role":            role,
+		"status":          status,
+		"expired":         status == "PENDING" && time.Now().After(expiresAt),
+	})
+}
+
 // POST /api/invites/{token}/accept — the only invite route not gated by
 // RequireTeamRole, since the whole point is the caller isn't a team member
 // yet. Still requires AuthMiddleware: the invite's target identity is
-// checked against the signed-in user's own verified email, not a bare
-// token-holder assumption.
+// checked against the signed-in user's own email, not a bare token-holder
+// assumption.
+//
+// Idempotent for the same user: a repeat call after a successful accept
+// (double-fired effect, a refresh, a second click) returns success instead
+// of "no longer valid" — the first call already did the work.
+//
+// Accepting also marks the account's email verified when it was still
+// unverified: the invite token only ever travels to the invited address, so
+// redeeming it from an account on that exact address proves mailbox control
+// just as the signup verification link would. Without this, someone who
+// signs up *from* an invite link has to chase a second email to finish.
 func handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	user, ok := GetUserFromContext(r)
 	if !ok {
@@ -471,6 +516,25 @@ func handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read the live row, not the JWT claims — the email in a token can be
+	// stale after an email change, and email_verified after verification.
+	var userEmail, userName string
+	var emailVerified bool
+	if err := db.QueryRow("SELECT email, name, email_verified FROM users WHERE id = ?", user.ID).Scan(&userEmail, &userName, &emailVerified); err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !strings.EqualFold(email, userEmail) {
+		http.Error(w, "This invite was sent to a different email address", http.StatusForbidden)
+		return
+	}
+
+	var alreadyMember string
+	memberErr := db.QueryRow("SELECT user_id FROM team_members WHERE team_id = ? AND user_id = ?", teamID, user.ID).Scan(&alreadyMember)
+	if status == "ACCEPTED" && memberErr == nil {
+		writeInviteAccepted(w, teamID, user.ID, userEmail, userName, emailVerified, "You're already on this team")
+		return
+	}
 	if status != "PENDING" {
 		http.Error(w, "This invite is no longer valid", http.StatusGone)
 		return
@@ -478,10 +542,6 @@ func handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	if time.Now().After(expiresAt) {
 		_, _ = db.Exec("UPDATE invitations SET status = 'EXPIRED' WHERE id = ?", inviteID)
 		http.Error(w, "This invite has expired", http.StatusGone)
-		return
-	}
-	if !strings.EqualFold(email, user.Email) {
-		http.Error(w, "This invite was sent to a different email address", http.StatusForbidden)
 		return
 	}
 
@@ -492,9 +552,7 @@ func handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	var alreadyMember string
-	err = tx.QueryRow("SELECT user_id FROM team_members WHERE team_id = ? AND user_id = ?", teamID, user.ID).Scan(&alreadyMember)
-	if err != nil {
+	if memberErr != nil {
 		memberID := generateUUID()
 		if _, err := tx.Exec("INSERT INTO team_members (id, team_id, user_id, role) VALUES (?, ?, ?, ?)", memberID, teamID, user.ID, role); err != nil {
 			http.Error(w, "Failed to join team: "+err.Error(), http.StatusInternalServerError)
@@ -506,6 +564,13 @@ func handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to finalize invite: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if !emailVerified {
+		if _, err := tx.Exec("UPDATE users SET email_verified = TRUE, verification_token = NULL, verification_expires_at = NULL WHERE id = ?", user.ID); err != nil {
+			http.Error(w, "Failed to verify email: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		emailVerified = true
+	}
 
 	if err := tx.Commit(); err != nil {
 		http.Error(w, "Transaction commit failed: "+err.Error(), http.StatusInternalServerError)
@@ -513,6 +578,28 @@ func handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	go syncTeamBillingSeats(teamID)
 
+	writeInviteAccepted(w, teamID, user.ID, userEmail, userName, emailVerified, "Invite accepted")
+}
+
+// writeInviteAccepted replies with a freshly signed token alongside the
+// team id: accepting can flip email_verified, which rides in the JWT, so the
+// client swaps its session instead of carrying a stale unverified claim.
+func writeInviteAccepted(w http.ResponseWriter, teamID, userID, email, name string, emailVerified bool, message string) {
+	token, err := GenerateToken(userID, email, name, emailVerified)
+	if err != nil {
+		http.Error(w, "Failed to sign token: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"team_id": teamID, "message": "Invite accepted"})
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"team_id": teamID,
+		"message": message,
+		"token":   token,
+		"user": map[string]interface{}{
+			"id":             userID,
+			"email":          email,
+			"name":           name,
+			"email_verified": emailVerified,
+		},
+	})
 }

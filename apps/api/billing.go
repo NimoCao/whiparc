@@ -492,6 +492,9 @@ func handleGetBillingPortal(w http.ResponseWriter, r *http.Request) {
 // a transient failure here shouldn't turn a successful "member removed" into
 // a 500).
 func syncTeamBillingSeats(teamID string) {
+	if billingProvider == nil {
+		return
+	}
 	var subscriptionID sql.NullString
 	if err := db.QueryRow("SELECT billing_subscription_id FROM teams WHERE id = ?", teamID).Scan(&subscriptionID); err != nil {
 		return

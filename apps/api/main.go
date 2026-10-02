@@ -342,6 +342,7 @@ func main() {
 	mux.Handle("POST /api/teams/{id}/invites", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleCreateTeamInvite))))
 	mux.Handle("GET /api/teams/{id}/invites", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleListTeamInvites))))
 	mux.Handle("DELETE /api/teams/{id}/invites/{inviteId}", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleRevokeTeamInvite))))
+	mux.HandleFunc("GET /api/invites/{token}/preview", enableCORS(handleInvitePreview))
 	mux.Handle("POST /api/invites/{token}/accept", AuthMiddleware(http.HandlerFunc(handleAcceptInvite)))
 
 	// Billing Routes (product-memory 08.5 item G1)

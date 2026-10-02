@@ -125,7 +125,16 @@ export default function TeamPageV2() {
       const teamsRes = await fetch(`${API_URL}/api/teams`, { headers: { Authorization: `Bearer ${token}` } });
       if (!teamsRes.ok) throw new Error(`Request failed with status ${teamsRes.status}`);
       const teams: Team[] = await teamsRes.json();
-      const activeTeam = teams[0] ?? null;
+      // Same persisted selection the dashboard's team switcher writes (and
+      // accepting an invite sets), so this page shows the team the person
+      // actually chose / just joined rather than whichever the API lists first.
+      let savedTeamId: string | null = null;
+      try {
+        savedTeamId = localStorage.getItem('whiparc-current-team');
+      } catch {
+        // storage unavailable — fall back to the first team
+      }
+      const activeTeam = teams.find((t) => t.id === savedTeamId) ?? teams[0] ?? null;
       setTeam(activeTeam);
       if (!activeTeam) {
         setRoster([]);
