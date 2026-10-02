@@ -189,14 +189,14 @@ func handleResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var email, name, plan string
+	var email, name string
 	var emailVerified bool
-	if err := db.QueryRow("SELECT email, name, plan, email_verified FROM users WHERE id = ?", userID).Scan(&email, &name, &plan, &emailVerified); err != nil {
+	if err := db.QueryRow("SELECT email, name, email_verified FROM users WHERE id = ?", userID).Scan(&email, &name, &emailVerified); err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	token, err := GenerateToken(userID, email, name, plan, emailVerified)
+	token, err := GenerateToken(userID, email, name, emailVerified)
 	if err != nil {
 		http.Error(w, "Failed to sign token: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -209,7 +209,6 @@ func handleResetPassword(w http.ResponseWriter, r *http.Request) {
 			"id":             userID,
 			"email":          email,
 			"name":           name,
-			"plan":           plan,
 			"email_verified": emailVerified,
 		},
 	})

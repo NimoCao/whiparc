@@ -21,6 +21,7 @@ type Team struct {
 	Name      string    `json:"name"`
 	Slug      string    `json:"slug"`
 	OwnerID   string    `json:"owner_id"`
+	Plan      string    `json:"plan"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -70,7 +71,7 @@ func handleGetTeams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(`
-		SELECT t.id, t.name, t.slug, t.owner_id, t.created_at 
+		SELECT t.id, t.name, t.slug, t.owner_id, t.plan, t.created_at
 		FROM teams t
 		JOIN team_members tm ON tm.team_id = t.id
 		WHERE tm.user_id = ?`, user.ID)
@@ -84,7 +85,7 @@ func handleGetTeams(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t Team
 		var createdAtStr string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Slug, &t.OwnerID, &createdAtStr); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Slug, &t.OwnerID, &t.Plan, &createdAtStr); err != nil {
 			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -273,6 +274,10 @@ func handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	err := db.QueryRow("SELECT COUNT(*) FROM team_members WHERE team_id = ? AND user_id = ?", teamID, user.ID).Scan(&count)
 	if err != nil || count == 0 {
 		http.Error(w, "Forbidden: You are not a member of the selected team", http.StatusForbidden)
+		return
+	}
+	if msg := projectLimitMessage(teamID); msg != "" {
+		writePlanLimit(w, msg)
 		return
 	}
 
@@ -555,6 +560,28 @@ func handleRejectJoinRequest(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Request rejected successfully"})
 }
 
+// bestPlanForUser is the cosmetic "your plan" value shown in the sidebar
+// across the dashboard/projects/runs/credentials/templates/team pages (a
+// one-line label under the user's name, predating per-team billing). It
+// resolves to the highest plan among every team the user belongs to — not
+// just teams they own — since billing moved to teams (product-memory 08.5
+// item G1) and a user can belong to several. This is a display convenience
+// only; nothing gates on it. Returns "FREE" (never an error) so a DB hiccup
+// degrades to the harmless default rather than breaking the me endpoint.
+func bestPlanForUser(userID string) string {
+	var plan string
+	err := db.QueryRow(`
+		SELECT t.plan FROM teams t
+		JOIN team_members tm ON tm.team_id = t.id
+		WHERE tm.user_id = ?
+		ORDER BY CASE t.plan WHEN 'ENTERPRISE' THEN 3 WHEN 'PRO' THEN 2 ELSE 1 END DESC
+		LIMIT 1`, userID).Scan(&plan)
+	if err != nil {
+		return "FREE"
+	}
+	return plan
+}
+
 // GET /api/auth/me
 func handleMe(w http.ResponseWriter, r *http.Request) {
 	user, ok := GetUserFromContext(r)
@@ -565,18 +592,18 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 
 	email := user.Email
 	name := user.Name
-	plan := user.Plan
 	emailVerified := user.EmailVerified
 	var onboardingDismissedAt sql.NullTime
 	var avatarURL sql.NullString
 	var pendingEmail sql.NullString
 
-	err := db.QueryRow("SELECT email, name, plan, email_verified, onboarding_dismissed_at, avatar_url, pending_email FROM users WHERE id = ?", user.ID).
-		Scan(&email, &name, &plan, &emailVerified, &onboardingDismissedAt, &avatarURL, &pendingEmail)
+	err := db.QueryRow("SELECT email, name, email_verified, onboarding_dismissed_at, avatar_url, pending_email FROM users WHERE id = ?", user.ID).
+		Scan(&email, &name, &emailVerified, &onboardingDismissedAt, &avatarURL, &pendingEmail)
 	if err != nil && err != sql.ErrNoRows {
 		log.Printf("[AUTH] Warning: failed to query live user for me endpoint: %v\n", err)
 	}
 	onboardingDismissed := onboardingDismissedAt.Valid
+	plan := bestPlanForUser(user.ID)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -673,11 +700,11 @@ func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var email, name, plan string
+	var email, name string
 	var emailVerified bool
 	var avatarURL sql.NullString
-	if err := db.QueryRow("SELECT email, name, plan, email_verified, avatar_url FROM users WHERE id = ?", user.ID).
-		Scan(&email, &name, &plan, &emailVerified, &avatarURL); err != nil {
+	if err := db.QueryRow("SELECT email, name, email_verified, avatar_url FROM users WHERE id = ?", user.ID).
+		Scan(&email, &name, &emailVerified, &avatarURL); err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -685,7 +712,7 @@ func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	// name rides in the JWT (TokenClaims.Name) — re-issue so a name change
 	// is reflected immediately client-side without waiting on a separate
 	// fetchMe() round trip, same reasoning as handleResetPassword's token.
-	token, err := GenerateToken(user.ID, email, name, plan, emailVerified)
+	token, err := GenerateToken(user.ID, email, name, emailVerified)
 	if err != nil {
 		http.Error(w, "Failed to sign token: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -698,7 +725,7 @@ func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 			"id":             user.ID,
 			"email":          email,
 			"name":           name,
-			"plan":           plan,
+			"plan":           bestPlanForUser(user.ID),
 			"email_verified": emailVerified,
 			"avatar_url":     avatarURL.String,
 		},
@@ -912,6 +939,10 @@ func handleDuplicateProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden: You are not a member of the destination team", http.StatusForbidden)
 		return
 	}
+	if msg := projectLimitMessage(teamID); msg != "" {
+		writePlanLimit(w, msg)
+		return
+	}
 
 	var nodesJSON, edgesJSON, viewportJSON string
 	err = db.QueryRow("SELECT nodes_json, edges_json, viewport_json FROM canvas_states WHERE project_id = ?", sourceID).Scan(
@@ -991,6 +1022,14 @@ func handleArchiveProject(w http.ResponseWriter, r *http.Request) {
 // PATCH /api/projects/{id}/unarchive
 func handleUnarchiveProject(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
+	// Unarchiving re-occupies a slot, so it's subject to the same cap as creating.
+	var teamID string
+	if err := db.QueryRow("SELECT team_id FROM projects WHERE id = ?", projectID).Scan(&teamID); err == nil {
+		if msg := projectLimitMessage(teamID); msg != "" {
+			writePlanLimit(w, msg)
+			return
+		}
+	}
 	res, err := db.Exec("UPDATE projects SET archived_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NOT NULL", projectID)
 	if err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)

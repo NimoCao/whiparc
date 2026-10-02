@@ -1,32 +1,83 @@
 'use client';
 
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
-import { Icon } from '@iconify/react';
 import { useAuthStore } from '../../store/useAuthStore';
+import {
+  AuthPageShell,
+  AuthSpinner,
+  AuthHeading,
+  AuthNotice,
+  AuthPrimaryButton,
+  AuthSecondaryButton,
+  AuthTextLink,
+} from '../../components/ui/AuthPageShell';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
-// Product-memory 08.5 item E1. Standalone page (same pattern as
-// /verify-email) for POST /api/invites/{token}/accept — the link an invite
-// email points to. Requires the recipient to already be signed in as the
-// exact email the invite was sent to; an unauthenticated visitor is bounced
-// to /login with ?redirect back here (LoginPageV2 already honors that param).
+// Mirrors apps/api/teams.go's handleInvitePreview (GET /api/invites/{token}/preview).
+interface InvitePreview {
+  team_name: string;
+  invited_by_name: string;
+  email: string;
+  role: string;
+  status: string;
+  expired: boolean;
+}
+
+// Product-memory 08.5 item E1. The page an invite email points to.
+//
+// Three situations, all driven by the invite's own preview (public — the
+// recipient may not have an account yet):
+//   - signed out: say what's on offer and send them to create an account or
+//     sign in, with the invited email prefilled and ?redirect back here;
+//   - signed in as a different email than the invite: say so, and offer to
+//     sign out (this page then falls into the signed-out case) instead of
+//     firing an accept that can only 403;
+//   - signed in as the invited email: accept, exactly once.
 function AcceptInviteContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get('token');
-  const { user, hasHydrated, token: authToken } = useAuthStore();
+  const { user, hasHydrated, token: authToken, logout, setSessionFromToken } = useAuthStore();
 
+  const [preview, setPreview] = useState<InvitePreview | 'loading' | 'notfound'>('loading');
   const [status, setStatus] = useState<'idle' | 'accepting' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState<string | null>(null);
+  const [joinedTeamId, setJoinedTeamId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!hasHydrated || !token) return;
-    if (!user || !authToken) return; // rendered branch below handles the sign-in prompt
-
+    if (!token) return;
     let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/invites/${encodeURIComponent(token)}/preview`);
+        if (cancelled) return;
+        setPreview(res.ok ? await res.json() : 'notfound');
+      } catch {
+        if (!cancelled) setPreview('notfound');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const invite = typeof preview === 'object' ? preview : null;
+  const emailMatches = !!(invite && user && invite.email.toLowerCase() === user.email.toLowerCase());
+
+  // One accept request per token. The POST isn't abortable in any useful
+  // sense (the server has already acted by the time a cleanup could run), so
+  // a re-run of this effect — React StrictMode in dev, or `user` being
+  // replaced by the fetchMe() that follows every sign-in — used to fire a
+  // second POST whose "no longer valid" reply overwrote the first one's
+  // success on screen.
+  const acceptedFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!token || !authToken || !emailMatches || acceptedFor.current === token) return;
+    acceptedFor.current = token;
+
     (async () => {
       setStatus('accepting');
       try {
@@ -34,108 +85,138 @@ function AcceptInviteContent() {
           method: 'POST',
           headers: { Authorization: `Bearer ${authToken}` },
         });
-        if (cancelled) return;
         if (!res.ok) {
           const detail = (await res.text().catch(() => '')).trim();
           throw new Error(detail || `Request failed with status ${res.status}`);
         }
+        const data: { team_id: string; token?: string } = await res.json();
+        // Accepting can flip email_verified (the invite proves the mailbox),
+        // which rides in the JWT — swap to the freshly signed one.
+        if (data.token) setSessionFromToken(data.token);
+        // Land the person on the team they just joined: the dashboard's team
+        // switcher and /team both read this key.
+        try {
+          localStorage.setItem('whiparc-current-team', data.team_id);
+        } catch {
+          // storage unavailable — they'll just land on their default team
+        }
+        setJoinedTeamId(data.team_id);
         setStatus('success');
       } catch (err) {
-        if (!cancelled) {
-          setStatus('error');
-          setMessage(err instanceof Error ? err.message : 'Failed to accept invite.');
-        }
+        setStatus('error');
+        setMessage(err instanceof Error ? err.message : 'Failed to accept invite.');
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [hasHydrated, token, user, authToken]);
-
-  const containerStyle: React.CSSProperties = { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: '#0d1117', color: '#c9d1d9' };
-  const cardStyle: React.CSSProperties = { width: '100%', maxWidth: 440, background: '#161b22', border: '1px solid #30363d', borderRadius: 12, padding: 32, textAlign: 'center' };
+  }, [token, authToken, emailMatches, setSessionFromToken]);
 
   if (!token) {
     return (
-      <div style={containerStyle}>
-        <div style={cardStyle}>
-          <Icon icon="lucide:mail-question" width={40} style={{ color: '#8b949e', marginBottom: 12 }} />
-          <h1 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 8px' }}>Missing invite link</h1>
-          <p style={{ fontSize: 13, color: '#8b949e', margin: 0 }}>This page needs a token from an invite email.</p>
-        </div>
-      </div>
+      <AuthPageShell>
+        <AuthHeading title="Missing invite link">This page needs the link from an invite email.</AuthHeading>
+        <AuthPrimaryButton href="/dashboard">Go to Dashboard</AuthPrimaryButton>
+      </AuthPageShell>
     );
   }
 
-  if (!hasHydrated) {
+  if (!hasHydrated || preview === 'loading') {
     return (
-      <div style={containerStyle}>
-        <Icon icon="lucide:loader-2" className="animate-spin" width={28} style={{ color: '#58a6ff' }} />
-      </div>
+      <AuthPageShell>
+        <AuthSpinner label="Loading invite..." />
+      </AuthPageShell>
     );
   }
 
+  if (preview === 'notfound' || !invite) {
+    return (
+      <AuthPageShell>
+        <AuthHeading title="Invite not found" />
+        <AuthNotice tone="error">This invite link isn&apos;t valid. Ask the team admin to send a new one.</AuthNotice>
+        <AuthPrimaryButton href="/dashboard">Go to Dashboard</AuthPrimaryButton>
+      </AuthPageShell>
+    );
+  }
+
+  const redirect = `/invites/accept?token=${encodeURIComponent(token)}`;
+  const authQuery = `email=${encodeURIComponent(invite.email)}&redirect=${encodeURIComponent(redirect)}`;
+  const offer = (
+    <AuthHeading title={`Join ${invite.team_name}`}>
+      {invite.invited_by_name} invited <strong style={{ color: 'var(--ink)' }}>{invite.email}</strong> to join as {invite.role.toLowerCase()}.
+    </AuthHeading>
+  );
+
+  // Not signed in.
   if (!user || !authToken) {
-    const redirect = `/invites/accept?token=${encodeURIComponent(token)}`;
+    if (invite.status !== 'PENDING' || invite.expired) {
+      return (
+        <AuthPageShell>
+          <AuthHeading title="Invite unavailable" />
+          <AuthNotice tone="error">
+            {invite.status === 'ACCEPTED'
+              ? 'This invite has already been used. Sign in to find the team.'
+              : 'This invite has expired. Ask the team admin to send a new one.'}
+          </AuthNotice>
+          <AuthPrimaryButton href={`/login?${authQuery}`}>Sign in</AuthPrimaryButton>
+        </AuthPageShell>
+      );
+    }
     return (
-      <div style={containerStyle}>
-        <div style={cardStyle}>
-          <Icon icon="lucide:log-in" width={40} style={{ color: '#58a6ff', marginBottom: 12 }} />
-          <h1 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 8px' }}>Sign in to accept</h1>
-          <p style={{ fontSize: 13, color: '#8b949e', margin: '0 0 20px' }}>Sign in with the email this invite was sent to, then you&apos;ll come right back here.</p>
-          <Link
-            href={`/login?redirect=${encodeURIComponent(redirect)}`}
-            style={{ display: 'inline-block', padding: '10px 20px', background: '#238636', color: '#fff', borderRadius: 6, fontSize: 14, fontWeight: 600, textDecoration: 'none' }}
-          >
-            Sign in
-          </Link>
-        </div>
-      </div>
+      <AuthPageShell>
+        {offer}
+        <AuthPrimaryButton href={`/login?mode=signup&${authQuery}`} arrow>
+          Create account
+        </AuthPrimaryButton>
+        <AuthSecondaryButton href={`/login?${authQuery}`}>I already have an account</AuthSecondaryButton>
+      </AuthPageShell>
+    );
+  }
+
+  // Signed in as someone else.
+  if (!emailMatches) {
+    return (
+      <AuthPageShell>
+        {offer}
+        <AuthNotice tone="error">
+          You&apos;re signed in as <strong>{user.email}</strong>, but this invite is for a different address.
+        </AuthNotice>
+        <AuthPrimaryButton onClick={() => logout()}>Sign out and continue</AuthPrimaryButton>
+        <AuthTextLink href="/dashboard">Back to Dashboard</AuthTextLink>
+      </AuthPageShell>
+    );
+  }
+
+  // Signed in as the invitee.
+  if (status === 'success') {
+    return (
+      <AuthPageShell>
+        <AuthHeading title={`You've joined ${invite.team_name}`}>Your email is verified and you now have access to the team.</AuthHeading>
+        <AuthPrimaryButton onClick={() => router.push(joinedTeamId ? '/team' : '/dashboard')} arrow>
+          Go to Team
+        </AuthPrimaryButton>
+        <AuthTextLink href="/dashboard">Go to Dashboard</AuthTextLink>
+      </AuthPageShell>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <AuthPageShell>
+        <AuthHeading title="Couldn't accept invite" />
+        <AuthNotice tone="error">{message}</AuthNotice>
+        <AuthPrimaryButton href="/dashboard">Go to Dashboard</AuthPrimaryButton>
+      </AuthPageShell>
     );
   }
 
   return (
-    <div style={containerStyle}>
-      <div style={cardStyle}>
-        {status === 'accepting' || status === 'idle' ? (
-          <>
-            <Icon icon="lucide:loader-2" className="animate-spin" width={36} style={{ color: '#58a6ff', marginBottom: 12 }} />
-            <h1 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 8px' }}>Accepting invite…</h1>
-          </>
-        ) : status === 'success' ? (
-          <>
-            <Icon icon="lucide:check-circle-2" width={40} style={{ color: '#3fb950', marginBottom: 12 }} />
-            <h1 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 8px' }}>You&apos;re in</h1>
-            <p style={{ fontSize: 13, color: '#8b949e', margin: '0 0 20px' }}>You&apos;ve joined the team.</p>
-            <button
-              type="button"
-              onClick={() => router.push('/team')}
-              style={{ padding: '10px 20px', background: '#238636', color: '#fff', border: 0, borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
-            >
-              Go to Team
-            </button>
-          </>
-        ) : (
-          <>
-            <Icon icon="lucide:alert-triangle" width={40} style={{ color: '#f85149', marginBottom: 12 }} />
-            <h1 style={{ fontSize: 20, fontWeight: 600, margin: '0 0 8px' }}>Couldn&apos;t accept invite</h1>
-            <p style={{ fontSize: 13, color: '#f85149', background: 'rgba(248,81,73,.1)', border: '1px solid rgba(248,81,73,.3)', borderRadius: 6, padding: '10px 12px', margin: 0 }}>{message}</p>
-          </>
-        )}
-      </div>
-    </div>
+    <AuthPageShell>
+      <AuthSpinner label="Joining the team..." />
+    </AuthPageShell>
   );
 }
 
 export default function AcceptInvitePage() {
   return (
-    <Suspense
-      fallback={
-        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0d1117' }}>
-          <Icon icon="lucide:loader-2" className="animate-spin" width={28} style={{ color: '#58a6ff' }} />
-        </div>
-      }
-    >
+    <Suspense fallback={<div style={{ minHeight: '100vh', background: '#0b0c0f' }} />}>
       <AcceptInviteContent />
     </Suspense>
   );

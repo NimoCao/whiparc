@@ -161,9 +161,9 @@ func handleConfirmEmailChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var name, plan string
+	var name string
 	var emailVerified bool
-	if err := db.QueryRow("SELECT name, plan, email_verified FROM users WHERE id = ?", userID).Scan(&name, &plan, &emailVerified); err != nil {
+	if err := db.QueryRow("SELECT name, email_verified FROM users WHERE id = ?", userID).Scan(&name, &emailVerified); err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -171,7 +171,7 @@ func handleConfirmEmailChange(w http.ResponseWriter, r *http.Request) {
 	// email rides in the JWT — re-issue so the new address takes effect
 	// immediately in whatever session confirms it, same reasoning as
 	// handleResetPassword/handleUpdateProfile.
-	token, err := GenerateToken(userID, pendingEmail, name, plan, emailVerified)
+	token, err := GenerateToken(userID, pendingEmail, name, emailVerified)
 	if err != nil {
 		http.Error(w, "Failed to sign token: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -184,7 +184,6 @@ func handleConfirmEmailChange(w http.ResponseWriter, r *http.Request) {
 			"id":             userID,
 			"email":          pendingEmail,
 			"name":           name,
-			"plan":           plan,
 			"email_verified": emailVerified,
 		},
 	})

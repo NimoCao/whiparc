@@ -137,6 +137,7 @@ var (
 	trackers           = make(map[string]*RunTracker)
 	trackersMutex      sync.Mutex
 	emailSender        EmailSender
+	billingProvider    BillingProvider
 	signupLimiter      *RateLimiter
 	loginLimiter       *RateLimiter
 	resendLimiter      *RateLimiter
@@ -280,8 +281,9 @@ func main() {
 	}
 	log.Println("[DB] Database initialized successfully.")
 
-	// Initialize mailer and rate limiters
+	// Initialize mailer, billing provider, and rate limiters
 	emailSender = NewEmailSender()
+	billingProvider = NewPaddleProvider()
 	signupLimiter = NewRateLimiter(5, 1*time.Hour, 5)         // 5 signups per hour per IP
 	loginLimiter = NewRateLimiter(10, 15*time.Minute, 10)     // 10 logins per 15 min per IP
 	resendLimiter = NewRateLimiter(3, 15*time.Minute, 3)      // 3 resends per 15 min per user/IP
@@ -293,6 +295,7 @@ func main() {
 
 	// Unauthenticated — polled by the reverse proxy / uptime monitor.
 	mux.HandleFunc("GET /healthz", handleHealthz)
+	mux.HandleFunc("GET /api/config", enableCORS(handleGetConfig))
 
 	// API Routes
 	mux.Handle("GET /api/projects/{id}/runs", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetRuns))))
@@ -308,7 +311,6 @@ func main() {
 	mux.HandleFunc("POST /api/auth/verify-email", enableCORS(handleVerifyEmail))
 	mux.HandleFunc("GET /api/auth/verify-email", enableCORS(handleVerifyEmail))
 	mux.Handle("POST /api/auth/resend-verification", AuthMiddleware(http.HandlerFunc(handleResendVerification)))
-	mux.Handle("POST /api/auth/upgrade", AuthMiddleware(http.HandlerFunc(handleUpgradePlan)))
 	mux.Handle("GET /api/auth/me", AuthMiddleware(http.HandlerFunc(handleMe)))
 	mux.Handle("PATCH /api/auth/profile", AuthMiddleware(http.HandlerFunc(handleUpdateProfile)))
 	mux.Handle("PATCH /api/auth/onboarding", AuthMiddleware(http.HandlerFunc(handleDismissOnboarding)))
@@ -341,7 +343,13 @@ func main() {
 	mux.Handle("POST /api/teams/{id}/invites", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleCreateTeamInvite))))
 	mux.Handle("GET /api/teams/{id}/invites", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleListTeamInvites))))
 	mux.Handle("DELETE /api/teams/{id}/invites/{inviteId}", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleRevokeTeamInvite))))
+	mux.HandleFunc("GET /api/invites/{token}/preview", enableCORS(handleInvitePreview))
 	mux.Handle("POST /api/invites/{token}/accept", AuthMiddleware(http.HandlerFunc(handleAcceptInvite)))
+
+	// Billing Routes (product-memory 08.5 item G1)
+	mux.Handle("GET /api/teams/{id}/billing", AuthMiddleware(RequireTeamRole("MEMBER")(http.HandlerFunc(handleGetTeamBilling))))
+	mux.Handle("POST /api/teams/{id}/billing/portal", AuthMiddleware(RequireTeamRole("ADMIN")(http.HandlerFunc(handleGetBillingPortal))))
+	mux.HandleFunc("POST /api/billing/webhook", handlePaddleWebhook)
 
 	// Project Routes
 	mux.Handle("GET /api/projects", AuthMiddleware(http.HandlerFunc(handleGetProjects)))
@@ -370,6 +378,7 @@ func main() {
 
 	// Custom Nodes Routes
 	mux.HandleFunc("POST /api/custom-nodes/validate", handleValidateCustomNode)
+	mux.Handle("GET /api/projects/{id}/entitlements", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetProjectEntitlements))))
 	mux.Handle("GET /api/projects/{id}/custom-nodes", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetCustomNodes))))
 	mux.Handle("POST /api/projects/{id}/custom-nodes", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleCreateCustomNode))))
 	mux.Handle("DELETE /api/projects/{id}/custom-nodes/{nodeId}", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleDeleteCustomNode))))
@@ -758,7 +767,7 @@ func handleDeploy(w http.ResponseWriter, r *http.Request) {
 	// user. Deliberately scoped to deploy only, not destroy: a user who
 	// already has hosted-sandbox resources up must always be able to tear
 	// them down, cutoff or not.
-	if runner.IsSandbox(canvasStr) && agentCtx == nil && sandboxDeployGatedForFreeTier(user.ID, user.Plan) {
+	if runner.IsSandbox(canvasStr) && agentCtx == nil && sandboxDeployGatedForFreeTier(user.ID, projectID) {
 		http.Error(w, "Free-tier sandbox deploys now run through your own machine via the local Sandbox Agent. Run `whiparc sandbox up` to pair one for this project, or upgrade to Pro for a hosted sandbox. See /docs for setup.", http.StatusBadRequest)
 		return
 	}
@@ -1354,11 +1363,20 @@ type TokenHeader struct {
 	Typ string `json:"typ"`
 }
 
+// TokenClaims deliberately carries no plan/billing info. Plan moved from
+// users to teams (product-memory 08.5 item G1) once billing became real, and
+// a user can belong to many teams with different plans — there's no single
+// "the user's plan" value a JWT claim could hold. Worse, a webhook-driven
+// plan change (Paddle calling in asynchronously, no active request/session
+// to reissue a token for) can't update an already-issued JWT the way
+// handleUpgradePlan used to reissue one synchronously — so any gate that
+// trusted a Plan claim here could stay wrong for the life of the token after
+// a real payment. Every plan check now reads teams.plan fresh from the DB at
+// the point it's needed (see sandboxDeployGatedForFreeTier's call sites).
 type TokenClaims struct {
 	ID            string `json:"id"`
 	Email         string `json:"email"`
 	Name          string `json:"name"`
-	Plan          string `json:"plan"`
 	EmailVerified bool   `json:"email_verified"`
 	Exp           int64  `json:"exp"`
 }
@@ -1371,7 +1389,7 @@ func generateRandomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-func GenerateToken(userID, email, name, plan string, emailVerified bool) (string, error) {
+func GenerateToken(userID, email, name string, emailVerified bool) (string, error) {
 	header := TokenHeader{Alg: "HS256", Typ: "JWT"}
 	headerJSON, _ := json.Marshal(header)
 	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
@@ -1380,7 +1398,6 @@ func GenerateToken(userID, email, name, plan string, emailVerified bool) (string
 		ID:            userID,
 		Email:         email,
 		Name:          name,
-		Plan:          plan,
 		EmailVerified: emailVerified,
 		Exp:           time.Now().Add(24 * time.Hour).Unix(),
 	}
@@ -1524,7 +1541,7 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	token, err := GenerateToken(userID, email, name, "FREE", false)
+	token, err := GenerateToken(userID, email, name, false)
 	if err != nil {
 		http.Error(w, "Failed to sign token: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1564,10 +1581,10 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var userID, name, plan string
+	var userID, name string
 	var emailVerified bool
 	var hash sql.NullString
-	err := db.QueryRow("SELECT id, name, password_hash, plan, email_verified FROM users WHERE email = ?", email).Scan(&userID, &name, &hash, &plan, &emailVerified)
+	err := db.QueryRow("SELECT id, name, password_hash, email_verified FROM users WHERE email = ?", email).Scan(&userID, &name, &hash, &emailVerified)
 	if err == sql.ErrNoRows {
 		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
 		return
@@ -1588,7 +1605,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := GenerateToken(userID, email, name, plan, emailVerified)
+	token, err := GenerateToken(userID, email, name, emailVerified)
 	if err != nil {
 		http.Error(w, "Failed to sign token: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1601,7 +1618,6 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			"id":             userID,
 			"email":          email,
 			"name":           name,
-			"plan":           plan,
 			"email_verified": emailVerified,
 		},
 	})
@@ -1634,9 +1650,9 @@ func handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var userID, email, name, plan string
+	var userID, email, name string
 	var expiresAt time.Time
-	err := db.QueryRow("SELECT id, email, name, plan, verification_expires_at FROM users WHERE verification_token = ?", tokenStr).Scan(&userID, &email, &name, &plan, &expiresAt)
+	err := db.QueryRow("SELECT id, email, name, verification_expires_at FROM users WHERE verification_token = ?", tokenStr).Scan(&userID, &email, &name, &expiresAt)
 	if err == sql.ErrNoRows {
 		http.Error(w, "Invalid or already used verification link", http.StatusBadRequest)
 		return
@@ -1656,7 +1672,7 @@ func handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newToken, err := GenerateToken(userID, email, name, plan, true)
+	newToken, err := GenerateToken(userID, email, name, true)
 	if err != nil {
 		http.Error(w, "Failed to sign updated session token: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1671,7 +1687,6 @@ func handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
 			"id":             userID,
 			"email":          email,
 			"name":           name,
-			"plan":           plan,
 			"email_verified": true,
 		},
 	})
@@ -1945,53 +1960,6 @@ func broadcastToRoom(roomID string, msg SyncMessage, senderConn *websocket.Conn)
 		}
 		_ = conn.WriteJSON(msg)
 	}
-}
-
-// POST /api/auth/upgrade
-func handleUpgradePlan(w http.ResponseWriter, r *http.Request) {
-	user, ok := GetUserFromContext(r)
-	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	var payload struct {
-		Plan string `json:"plan"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
-		return
-	}
-
-	plan := strings.ToUpper(payload.Plan)
-	if plan != "PRO" && plan != "ENTERPRISE" && plan != "FREE" {
-		http.Error(w, "Invalid plan selection", http.StatusBadRequest)
-		return
-	}
-
-	_, err := db.Exec("UPDATE users SET plan = ? WHERE id = ?", plan, user.ID)
-	if err != nil {
-		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	newToken, err := GenerateToken(user.ID, user.Email, user.Name, plan, user.EmailVerified)
-	if err != nil {
-		http.Error(w, "Failed to sign token", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"token": newToken,
-		"user": map[string]interface{}{
-			"id":             user.ID,
-			"email":          user.Email,
-			"name":           user.Name,
-			"plan":           plan,
-			"email_verified": user.EmailVerified,
-		},
-	})
 }
 
 // extractSecretsAndEnvironment returns the runner env vars, the secret

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { Icon } from '@iconify/react';
+import { initializePaddle, type Paddle } from '@paddle/paddle-js';
 import { useAuthStore } from '../store/useAuthStore';
 import ProfileMenu from '../components/ProfileMenu';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
@@ -56,6 +57,25 @@ interface Team {
   created_at: string;
 }
 
+// Mirrors apps/api/billing.go's TeamBillingInfo (GET /api/teams/{id}/billing)
+// — product-memory 08.5 item G1.
+interface TeamBillingInfo {
+  team_id: string;
+  plan: 'FREE' | 'PRO' | 'ENTERPRISE';
+  billing_provider?: string;
+  subscription_status?: string;
+  seats?: number;
+  member_count: number;
+  current_period_end?: string;
+  has_subscription: boolean;
+  price_id_pro?: string;
+  // Present only for a Free team on a deployment where plan limits are live.
+  plan_enforcement?: boolean;
+  limits?: { members: { used: number; max: number }; projects: { used: number; max: number } };
+}
+
+const PLAN_LABEL: Record<TeamBillingInfo['plan'], string> = { FREE: 'Free', PRO: 'Pro', ENTERPRISE: 'Enterprise' };
+
 const ROLE_RANK: Record<TeamMemberInfo['role'], number> = { OWNER: 3, ADMIN: 2, MEMBER: 1 };
 const ROLE_STYLE: Record<TeamMemberInfo['role'], { bg: string; fg: string; border: string }> = {
   OWNER: { bg: 'var(--accent)', fg: 'var(--on-accent)', border: 'none' },
@@ -90,11 +110,16 @@ export default function TeamPageV2() {
   const [team, setTeam] = useState<Team | null>(null);
   const [roster, setRoster] = useState<TeamMemberInfo[]>([]);
   const [invites, setInvites] = useState<InvitationInfo[]>([]);
+  const [billing, setBilling] = useState<TeamBillingInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [paddle, setPaddle] = useState<Paddle | null>(null);
+  const [checkoutPending, setCheckoutPending] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
 
   const loadAll = async () => {
     if (!token) return;
@@ -103,11 +128,21 @@ export default function TeamPageV2() {
       const teamsRes = await fetch(`${API_URL}/api/teams`, { headers: { Authorization: `Bearer ${token}` } });
       if (!teamsRes.ok) throw new Error(`Request failed with status ${teamsRes.status}`);
       const teams: Team[] = await teamsRes.json();
-      const activeTeam = teams[0] ?? null;
+      // Same persisted selection the dashboard's team switcher writes (and
+      // accepting an invite sets), so this page shows the team the person
+      // actually chose / just joined rather than whichever the API lists first.
+      let savedTeamId: string | null = null;
+      try {
+        savedTeamId = localStorage.getItem('whiparc-current-team');
+      } catch {
+        // storage unavailable — fall back to the first team
+      }
+      const activeTeam = teams.find((t) => t.id === savedTeamId) ?? teams[0] ?? null;
       setTeam(activeTeam);
       if (!activeTeam) {
         setRoster([]);
         setInvites([]);
+        setBilling(null);
         setLoadError(null);
         return;
       }
@@ -126,6 +161,13 @@ export default function TeamPageV2() {
       } catch {
         setInvites([]);
       }
+
+      try {
+        const billingRes = await fetch(`${API_URL}/api/teams/${activeTeam.id}/billing`, { headers: { Authorization: `Bearer ${token}` } });
+        setBilling(billingRes.ok ? await billingRes.json() : null);
+      } catch {
+        setBilling(null);
+      }
       setLoadError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load team.';
@@ -141,6 +183,65 @@ export default function TeamPageV2() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  // Checkout happens entirely client-side via Paddle.js (no backend "create
+  // checkout" endpoint — see apps/api/billing.go's BillingProvider doc
+  // comment); the webhook is what actually provisions the plan once payment
+  // completes, never this redirect/event. clientToken missing just means
+  // billing isn't configured for this environment — the Upgrade button below
+  // stays disabled rather than throwing at init time.
+  useEffect(() => {
+    const clientToken = process.env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN;
+    if (!clientToken || paddle?.Initialized) return;
+    initializePaddle({
+      token: clientToken,
+      environment: (process.env.NEXT_PUBLIC_PADDLE_ENV as 'sandbox' | 'production') || 'sandbox',
+      eventCallback: (event) => {
+        if (event.name === 'checkout.completed') {
+          setCheckoutPending(true);
+          // The webhook (the source of truth) lands within a second or two
+          // of this event in practice, but isn't guaranteed synchronous with
+          // it — one short delayed refetch covers the common case without
+          // polling indefinitely. A slower webhook just means the plan
+          // badge updates on the next natural page load instead.
+          setTimeout(() => {
+            setCheckoutPending(false);
+            void loadAll();
+          }, 2500);
+        }
+      },
+    }).then((p) => p && setPaddle(p));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleUpgrade = () => {
+    if (!paddle || !team || !user || !billing?.price_id_pro) return;
+    setBillingError(null);
+    paddle.Checkout.open({
+      items: [{ priceId: billing.price_id_pro, quantity: Math.max(1, billing.member_count) }],
+      customer: { email: user.email },
+      customData: { team_id: team.id },
+      settings: { successUrl: `${window.location.origin}/team` },
+    });
+  };
+
+  const handleManageBilling = async () => {
+    if (!token || !team) return;
+    setBillingError(null);
+    setPortalLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/teams/${team.id}/billing/portal`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error((await res.text().catch(() => '')).trim() || `Request failed with status ${res.status}`);
+      const data: { url: string } = await res.json();
+      window.location.href = data.url;
+    } catch (err) {
+      setBillingError(err instanceof Error ? err.message : 'Failed to open the billing portal.');
+      setPortalLoading(false);
+    }
+  };
 
   const myRole = useMemo(() => roster.find((m) => m.user_id === user?.id)?.role, [roster, user]);
   const canManage = myRole === 'OWNER' || myRole === 'ADMIN';
@@ -328,6 +429,89 @@ export default function TeamPageV2() {
                   <p style={{ margin: '6px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, lineHeight: 1, color: 'var(--ink)' }}>{invites.length}</p>
                 </div>
               </div>
+
+              <section>
+                <h2 style={{ margin: '0 0 12px', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 18, color: 'var(--ink)' }}>Billing</h2>
+                <div style={{ border: '1px solid var(--line)', padding: '16px 18px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 16, justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-mono-marketing)',
+                        fontSize: 11,
+                        letterSpacing: '.06em',
+                        textTransform: 'uppercase',
+                        padding: '4px 10px',
+                        background: billing?.plan === 'FREE' || !billing ? 'var(--chip)' : 'var(--accent)',
+                        color: billing?.plan === 'FREE' || !billing ? 'var(--ink2)' : 'var(--on-accent)',
+                      }}
+                    >
+                      {billing ? PLAN_LABEL[billing.plan] : 'Free'}
+                    </span>
+                    <div>
+                      <p style={{ margin: 0, fontSize: 13.5, color: 'var(--ink)' }}>
+                        {billing?.plan === 'PRO'
+                          ? `$19 / seat / month · ${billing.member_count} member${billing.member_count === 1 ? '' : 's'}`
+                          : 'Hosted sandbox, extra seats, and priority support'}
+                      </p>
+                      <p style={{ margin: '3px 0 0', fontSize: 11.5, color: 'var(--ink3)' }}>
+                        {billing?.subscription_status === 'past_due'
+                          ? 'Payment failed — update your card to keep Pro access.'
+                          : billing?.current_period_end
+                            ? `Renews ${new Date(billing.current_period_end).toLocaleDateString()}`
+                            : canManage
+                              ? 'Upgrade for unlimited members and projects, custom nodes, Pro templates and the hosted sandbox.'
+                              : "Only the team's owner or admins can change billing."}
+                      </p>
+                      {billing?.limits && (
+                        <p style={{ margin: '6px 0 0', display: 'flex', flexWrap: 'wrap', gap: 14, fontFamily: 'var(--font-mono-marketing)', fontSize: 11, letterSpacing: '.04em', color: 'var(--ink2)' }}>
+                          {(
+                            [
+                              ['Members', billing.limits.members],
+                              ['Projects', billing.limits.projects],
+                            ] as const
+                          ).map(([label, u]) => (
+                            <span key={label} style={{ color: u.used >= u.max ? 'var(--amber)' : undefined }}>
+                              {label} {u.used}/{u.max}
+                            </span>
+                          ))}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {canManage && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {checkoutPending && <span style={{ fontSize: 12, color: 'var(--ink3)' }}>Confirming payment...</span>}
+                      {billing?.has_subscription ? (
+                        <button
+                          type="button"
+                          onClick={handleManageBilling}
+                          disabled={portalLoading}
+                          className="wp-team-iconbtn"
+                          style={{ height: 34, padding: '0 14px', fontSize: 13, border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink)', cursor: portalLoading ? 'default' : 'pointer', opacity: portalLoading ? 0.6 : 1 }}
+                        >
+                          {portalLoading ? 'Opening...' : 'Manage billing'}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleUpgrade}
+                          disabled={!paddle || !billing?.price_id_pro}
+                          title={!billing?.price_id_pro ? 'Billing is not configured for this environment yet' : undefined}
+                          className="wp-blueprint wp-team-submit"
+                          style={{ position: 'relative', height: 34, padding: '0 16px', fontSize: 13, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: !paddle || !billing?.price_id_pro ? 'not-allowed' : 'pointer', opacity: !paddle || !billing?.price_id_pro ? 0.5 : 1 }}
+                        >
+                          Upgrade to Pro
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {billingError && (
+                  <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 10%, transparent)', border: '1px solid var(--danger)', padding: '6px 10px', width: 'fit-content' }}>
+                    {billingError}
+                  </p>
+                )}
+              </section>
 
               <section>
                 <div style={{ border: '1px solid var(--line)', overflowX: 'auto' }}>

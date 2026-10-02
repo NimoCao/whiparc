@@ -31,6 +31,7 @@ import { SnapshotHistoryDrawer } from '../components/SnapshotHistoryDrawer';
 import { InputWithVariablePicker } from '../components/VariablePicker';
 import EmailVerificationBanner from '../components/EmailVerificationBanner';
 import { generateAnsibleYAML } from '../lib/exportYaml';
+import { useProjectEntitlements } from '../lib/usePlan';
 import { downloadZipBundle, downloadTerraformZip, generateBundleFiles, generateTerraformFiles } from '../lib/bundleGenerator';
 import { DEFAULT_INSTANCE_PARAMS, DEFAULT_SG_PARAMS } from '../lib/terraformDefaults';
 import type { Project } from '../lib/types';
@@ -3031,6 +3032,7 @@ function WorkspaceContent() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isCustomNodeOpen, setIsCustomNodeOpen] = useState(false);
+  const projectEntitlements = useProjectEntitlements(projectId);
   const [availableCredentials, setAvailableCredentials] = useState<Credential[]>([]);
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
   const [migrationStatus, setMigrationStatus] = useState<{ gated: boolean; has_active_agent: boolean; grace_period_end: string } | null>(null);
@@ -3933,6 +3935,7 @@ function WorkspaceContent() {
             onAddNode={handleAddNodeToCanvas}
             isReadOnly={isPipelineBusy || saveStatus === 'readonly'}
             onCreateCustomNode={() => setIsCustomNodeOpen(true)}
+            customNodesLocked={Boolean(projectEntitlements?.plan_enforcement && !projectEntitlements.custom_nodes_allowed)}
           />
 
           <main className="flex-1 relative overflow-hidden flex flex-col" style={{ background: 'var(--ground)' }}>
