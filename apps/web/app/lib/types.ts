@@ -38,6 +38,8 @@ export interface Template {
   install_count: number;
   created_at: string;
   updated_at: string;
+  // Curated server-side (apps/api/templates.go proSeedTemplateTitles); FREE unless marked PRO.
+  tier?: 'FREE' | 'PRO';
   nodes_json?: string;
   edges_json?: string;
   viewport_json?: string;

@@ -69,6 +69,9 @@ interface TeamBillingInfo {
   current_period_end?: string;
   has_subscription: boolean;
   price_id_pro?: string;
+  // Present only for a Free team on a deployment where plan limits are live.
+  plan_enforcement?: boolean;
+  limits?: { members: { used: number; max: number }; projects: { used: number; max: number } };
 }
 
 const PLAN_LABEL: Record<TeamBillingInfo['plan'], string> = { FREE: 'Free', PRO: 'Pro', ENTERPRISE: 'Enterprise' };
@@ -456,9 +459,23 @@ export default function TeamPageV2() {
                           : billing?.current_period_end
                             ? `Renews ${new Date(billing.current_period_end).toLocaleDateString()}`
                             : canManage
-                              ? 'Upgrade to unlock the hosted sandbox for every project this team owns.'
+                              ? 'Upgrade for unlimited members and projects, custom nodes, Pro templates and the hosted sandbox.'
                               : "Only the team's owner or admins can change billing."}
                       </p>
+                      {billing?.limits && (
+                        <p style={{ margin: '6px 0 0', display: 'flex', flexWrap: 'wrap', gap: 14, fontFamily: 'var(--font-mono-marketing)', fontSize: 11, letterSpacing: '.04em', color: 'var(--ink2)' }}>
+                          {(
+                            [
+                              ['Members', billing.limits.members],
+                              ['Projects', billing.limits.projects],
+                            ] as const
+                          ).map(([label, u]) => (
+                            <span key={label} style={{ color: u.used >= u.max ? 'var(--amber)' : undefined }}>
+                              {label} {u.used}/{u.max}
+                            </span>
+                          ))}
+                        </p>
+                      )}
                     </div>
                   </div>
                   {canManage && (

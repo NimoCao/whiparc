@@ -17,17 +17,19 @@ import (
 // not change the template. See product-memory 01.3 (whiparc/cloud) for the
 // full data-model rationale.
 type Template struct {
-	ID              string    `json:"id"`
-	SourceProjectID *string   `json:"source_project_id,omitempty"`
-	AuthorUserID    string    `json:"author_user_id"`
-	AuthorName      string    `json:"author_name,omitempty"`
-	Title           string    `json:"title"`
-	Description     string    `json:"description"`
-	Category        string    `json:"category"`
-	Tags            []string  `json:"tags"`
-	InstallCount    int       `json:"install_count"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID              string   `json:"id"`
+	SourceProjectID *string  `json:"source_project_id,omitempty"`
+	AuthorUserID    string   `json:"author_user_id"`
+	AuthorName      string   `json:"author_name,omitempty"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description"`
+	Category        string   `json:"category"`
+	Tags            []string `json:"tags"`
+	InstallCount    int      `json:"install_count"`
+	// Tier is FREE or PRO; curated (see proSeedTemplateTitles), never author-set.
+	Tier      string    `json:"tier"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Canvas payload — populated on both the list and detail responses.
 	// The catalog grid renders a mini preview of each card's own graph
@@ -117,7 +119,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 	listQuery := fmt.Sprintf(`
 		SELECT t.id, t.source_project_id, t.author_user_id, COALESCE(u.name, ''), t.title, t.description,
 		       t.category, t.tags, t.install_count, t.created_at, t.updated_at,
-		       t.nodes_json, t.edges_json, t.viewport_json
+		       t.nodes_json, t.edges_json, t.viewport_json, t.tier
 		FROM templates t
 		LEFT JOIN users u ON u.id = t.author_user_id
 		WHERE %s
@@ -138,7 +140,7 @@ func handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		var tagsJSON, createdAtStr, updatedAtStr string
 		err := rows.Scan(&t.ID, &sourceProjectID, &t.AuthorUserID, &t.AuthorName, &t.Title, &t.Description,
 			&t.Category, &tagsJSON, &t.InstallCount, &createdAtStr, &updatedAtStr,
-			&t.NodesJSON, &t.EdgesJSON, &t.ViewportJSON)
+			&t.NodesJSON, &t.EdgesJSON, &t.ViewportJSON, &t.Tier)
 		if err != nil {
 			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -176,13 +178,13 @@ func handleGetTemplateByID(w http.ResponseWriter, r *http.Request) {
 	err := db.QueryRow(`
 		SELECT t.id, t.source_project_id, t.author_user_id, COALESCE(u.name, ''), t.title, t.description,
 		       t.category, t.tags, t.install_count, t.created_at, t.updated_at,
-		       t.nodes_json, t.edges_json, t.viewport_json
+		       t.nodes_json, t.edges_json, t.viewport_json, t.tier
 		FROM templates t
 		LEFT JOIN users u ON u.id = t.author_user_id
 		WHERE t.id = ? AND t.status = 'PUBLISHED'`, id).Scan(
 		&t.ID, &sourceProjectID, &t.AuthorUserID, &t.AuthorName, &t.Title, &t.Description,
 		&t.Category, &tagsJSON, &t.InstallCount, &createdAtStr, &updatedAtStr,
-		&t.NodesJSON, &t.EdgesJSON, &t.ViewportJSON)
+		&t.NodesJSON, &t.EdgesJSON, &t.ViewportJSON, &t.Tier)
 	if err == sql.ErrNoRows {
 		http.Error(w, "Template not found", http.StatusNotFound)
 		return
@@ -219,9 +221,9 @@ func handleUseTemplate(w http.ResponseWriter, r *http.Request) {
 
 	templateID := r.PathValue("id")
 
-	var title, nodesJSON, edgesJSON, viewportJSON string
-	err := db.QueryRow(`SELECT title, nodes_json, edges_json, viewport_json FROM templates WHERE id = ? AND status = 'PUBLISHED'`, templateID).
-		Scan(&title, &nodesJSON, &edgesJSON, &viewportJSON)
+	var title, nodesJSON, edgesJSON, viewportJSON, tier string
+	err := db.QueryRow(`SELECT title, nodes_json, edges_json, viewport_json, tier FROM templates WHERE id = ? AND status = 'PUBLISHED'`, templateID).
+		Scan(&title, &nodesJSON, &edgesJSON, &viewportJSON, &tier)
 	if err == sql.ErrNoRows {
 		http.Error(w, "Template not found", http.StatusNotFound)
 		return
@@ -235,6 +237,15 @@ func handleUseTemplate(w http.ResponseWriter, r *http.Request) {
 	err = db.QueryRow("SELECT id FROM teams WHERE slug = ?", "personal-"+user.ID).Scan(&teamID)
 	if err != nil {
 		http.Error(w, "Could not resolve your personal workspace: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if msg := proTemplateLimitMessage(tier, user.ID); msg != "" {
+		writePlanLimit(w, msg)
+		return
+	}
+	if msg := projectLimitMessage(teamID); msg != "" {
+		writePlanLimit(w, msg)
 		return
 	}
 
@@ -502,6 +513,15 @@ func handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 // exercise list/detail/fork end-to-end; richer, hand-authored graphs should
 // replace them before this feature is publicly launched. Tracked in
 // product-memory 08.1 (Non-Implemented & Mocked Features).
+// proSeedTemplateTitles are the official templates marked tier PRO. Tier is
+// curated, not author-settable: no publish/update endpoint accepts it, so a
+// user can't mark their own template PRO (or un-gate someone else's). A
+// product call, easy to change — migration 12 applies the same list to
+// databases seeded before tiers existed.
+var proSeedTemplateTitles = map[string]bool{
+	"Three-Tier Web App (EC2 + RDS)": true,
+}
+
 func seedOfficialTemplates() error {
 	var count int
 	if err := db.QueryRow("SELECT COUNT(*) FROM templates").Scan(&count); err != nil {
@@ -513,9 +533,9 @@ func seedOfficialTemplates() error {
 
 	type seed struct {
 		title, description, category string
-		tags                          []string
-		nodes                         []map[string]any
-		edges                         []map[string]any
+		tags                         []string
+		nodes                        []map[string]any
+		edges                        []map[string]any
 	}
 
 	seeds := []seed{
@@ -599,10 +619,14 @@ func seedOfficialTemplates() error {
 			return fmt.Errorf("failed to marshal seed tags for %q: %w", s.title, err)
 		}
 
+		tier := "FREE"
+		if proSeedTemplateTitles[s.title] {
+			tier = "PRO"
+		}
 		_, err = db.Exec(`
-			INSERT INTO templates (id, source_project_id, author_user_id, title, description, category, tags, nodes_json, edges_json, viewport_json, status)
-			VALUES (?, NULL, 'whiparc_official', ?, ?, ?, ?, ?, ?, '{"x":0,"y":0,"zoom":1}', 'PUBLISHED')`,
-			id, s.title, s.description, s.category, string(tagsJSON), string(nodesJSON), string(edgesJSON))
+			INSERT INTO templates (id, source_project_id, author_user_id, title, description, category, tags, nodes_json, edges_json, viewport_json, status, tier)
+			VALUES (?, NULL, 'whiparc_official', ?, ?, ?, ?, ?, ?, '{"x":0,"y":0,"zoom":1}', 'PUBLISHED', ?)`,
+			id, s.title, s.description, s.category, string(tagsJSON), string(nodesJSON), string(edgesJSON), tier)
 		if err != nil {
 			return fmt.Errorf("failed to seed template %q: %w", s.title, err)
 		}

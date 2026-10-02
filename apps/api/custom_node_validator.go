@@ -236,6 +236,11 @@ func handleCreateCustomNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if msg := customNodeLimitMessage(projectID); msg != "" {
+		writePlanLimit(w, msg)
+		return
+	}
+
 	var payload struct {
 		Title       string `json:"title"`
 		Tech        string `json:"tech"`

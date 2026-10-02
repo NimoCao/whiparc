@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import useCanvasStore from '../store/useCanvasStore';
 import type { CustomLibraryNode } from '../store/useCanvasStore';
 import { BlueprintCorners } from './ui/BlueprintCorners';
+import { isPaidPlan, useProjectEntitlements } from '../lib/usePlan';
 import { techColor } from '../lib/canvasDesign';
 import './ui/blueprint.css';
 import './CustomNodeModal.css';
@@ -55,7 +56,13 @@ export default function CustomNodeModal({ isOpen, onClose, projectId }: CustomNo
   const [isTechDropdownOpen, setIsTechDropdownOpen] = useState(false);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-  const isPremium = user?.plan === 'PRO' || user?.plan === 'ENTERPRISE';
+  // Custom-node creation is gated by the *project's* team plan, not the
+  // signed-in user's best plan (a user can be Pro on one team and Free on the
+  // team that owns this project) — so ask the server (F3). Until it answers,
+  // fall back to the user's best plan as a first guess so the editor doesn't
+  // flash for someone who's about to see the paywall, or vice versa.
+  const entitlements = useProjectEntitlements(isOpen ? projectId : null);
+  const isPremium = entitlements?.custom_nodes_allowed ?? isPaidPlan(user?.plan);
 
   // Sync default code template when tech changes.
   // Resetting the editor's template + validation state to match the

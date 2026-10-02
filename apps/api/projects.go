@@ -276,6 +276,10 @@ func handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden: You are not a member of the selected team", http.StatusForbidden)
 		return
 	}
+	if msg := projectLimitMessage(teamID); msg != "" {
+		writePlanLimit(w, msg)
+		return
+	}
 
 	projectID := fmt.Sprintf("proj_%d", time.Now().UnixNano())
 
@@ -935,6 +939,10 @@ func handleDuplicateProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Forbidden: You are not a member of the destination team", http.StatusForbidden)
 		return
 	}
+	if msg := projectLimitMessage(teamID); msg != "" {
+		writePlanLimit(w, msg)
+		return
+	}
 
 	var nodesJSON, edgesJSON, viewportJSON string
 	err = db.QueryRow("SELECT nodes_json, edges_json, viewport_json FROM canvas_states WHERE project_id = ?", sourceID).Scan(
@@ -1014,6 +1022,14 @@ func handleArchiveProject(w http.ResponseWriter, r *http.Request) {
 // PATCH /api/projects/{id}/unarchive
 func handleUnarchiveProject(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
+	// Unarchiving re-occupies a slot, so it's subject to the same cap as creating.
+	var teamID string
+	if err := db.QueryRow("SELECT team_id FROM projects WHERE id = ?", projectID).Scan(&teamID); err == nil {
+		if msg := projectLimitMessage(teamID); msg != "" {
+			writePlanLimit(w, msg)
+			return
+		}
+	}
 	res, err := db.Exec("UPDATE projects SET archived_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NOT NULL", projectID)
 	if err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)

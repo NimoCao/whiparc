@@ -288,34 +288,42 @@ func (p *PaddleProvider) UpdateSeats(subscriptionID string, seats int) error {
 // --- HTTP handlers ---
 
 // resolveTeamIDForBillingEvent maps an inbound event to the internal team
-// it's about. custom_data.team_id (only reliably present on the
-// subscription.created that follows checkout) is tried first; later events
-// for the same subscription fall back to matching on billing_subscription_id
-// or billing_customer_id against whatever an earlier event already stored —
-// Paddle doesn't guarantee custom_data on every event type for a
-// subscription, only that it's copied onto the subscription at creation
-// time, not necessarily echoed in every subsequent webhook body.
+// it's about.
+//
+// The subscription id is matched first and is authoritative: it's the value
+// this server itself stored from an earlier event, so it can't be spoofed by
+// anything a browser sends. Only when no team owns that subscription yet (the
+// subscription.created that follows checkout) is custom_data.team_id used —
+// and that value is *client-supplied* (Paddle.Checkout.open's customData),
+// so it's treated as a claim, not a fact: a team that already has a live
+// subscription is never rebound to a different one, otherwise any team admin
+// could point their own payment at someone else's team id and clobber that
+// team's billing link (or flip it to PRO for free).
+//
+// There is deliberately no billing_customer_id fallback: one Paddle customer
+// (one person's email) can hold subscriptions for several teams, so matching
+// on it would misattribute events between them.
 func resolveTeamIDForBillingEvent(ev *BillingEvent) (string, error) {
-	if ev.TeamID != "" {
-		var id string
-		if err := db.QueryRow("SELECT id FROM teams WHERE id = ?", ev.TeamID).Scan(&id); err == nil {
-			return id, nil
-		}
-	}
 	if ev.SubscriptionID != "" {
 		var id string
 		if err := db.QueryRow("SELECT id FROM teams WHERE billing_subscription_id = ?", ev.SubscriptionID).Scan(&id); err == nil {
 			return id, nil
 		}
 	}
-	if ev.CustomerID != "" {
+	if ev.TeamID != "" {
 		var id string
-		if err := db.QueryRow("SELECT id FROM teams WHERE billing_customer_id = ?", ev.CustomerID).Scan(&id); err == nil {
+		var existingSub, existingStatus sql.NullString
+		err := db.QueryRow("SELECT id, billing_subscription_id, subscription_status FROM teams WHERE id = ?", ev.TeamID).Scan(&id, &existingSub, &existingStatus)
+		if err == nil {
+			if existingSub.Valid && existingSub.String != "" && existingSub.String != ev.SubscriptionID && grantsProAccess(existingStatus.String) {
+				return "", fmt.Errorf("refusing to rebind team %s: it already has live subscription %s, event %s is for %s",
+					id, existingSub.String, ev.EventID, ev.SubscriptionID)
+			}
 			return id, nil
 		}
 	}
-	return "", fmt.Errorf("could not resolve a team for billing event %s (type=%s team_id=%q subscription_id=%q customer_id=%q)",
-		ev.EventID, ev.EventType, ev.TeamID, ev.SubscriptionID, ev.CustomerID)
+	return "", fmt.Errorf("could not resolve a team for billing event %s (type=%s team_id=%q subscription_id=%q)",
+		ev.EventID, ev.EventType, ev.TeamID, ev.SubscriptionID)
 }
 
 // POST /api/billing/webhook — public (Paddle calls this directly, no user
@@ -407,6 +415,21 @@ type TeamBillingInfo struct {
 	CurrentPeriodEnd   string `json:"current_period_end,omitempty"`
 	HasSubscription    bool   `json:"has_subscription"`
 	PriceIDPro         string `json:"price_id_pro,omitempty"`
+	// PlanEnforcement is false on deployments without billing (self-hosted),
+	// where no limits apply and the UI shouldn't show any.
+	PlanEnforcement bool        `json:"plan_enforcement"`
+	Limits          *TeamLimits `json:"limits,omitempty"`
+}
+
+type LimitUsage struct {
+	Used int `json:"used"`
+	Max  int `json:"max"`
+}
+
+// TeamLimits is only populated for a Free team while enforcement is on.
+type TeamLimits struct {
+	Members  LimitUsage `json:"members"`
+	Projects LimitUsage `json:"projects"`
 }
 
 // GET /api/teams/{id}/billing — any team member can see the team's own plan
@@ -448,6 +471,13 @@ func handleGetTeamBilling(w http.ResponseWriter, r *http.Request) {
 	}
 	if periodEnd.Valid {
 		resp.CurrentPeriodEnd = periodEnd.Time.Format(time.RFC3339)
+	}
+	resp.PlanEnforcement = planEnforcementEnabled()
+	if resp.PlanEnforcement && !planIsPaid(plan) {
+		resp.Limits = &TeamLimits{
+			Members:  LimitUsage{Used: teamMemberCount(teamID, true), Max: freeMaxMembers},
+			Projects: LimitUsage{Used: teamActiveProjectCount(teamID), Max: freeMaxProjects},
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

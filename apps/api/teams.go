@@ -360,6 +360,11 @@ func handleCreateTeamInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if msg := memberLimitMessage(teamID, true); msg != "" {
+		writePlanLimit(w, msg)
+		return
+	}
+
 	inviteID := generateUUID()
 	token := generateRandomHex(32)
 	expiresAt := time.Now().Add(7 * 24 * time.Hour)
@@ -543,6 +548,16 @@ func handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		_, _ = db.Exec("UPDATE invitations SET status = 'EXPIRED' WHERE id = ?", inviteID)
 		http.Error(w, "This invite has expired", http.StatusGone)
 		return
+	}
+
+	// The invite itself was counted as a reserved seat when it was created,
+	// so only *members* are counted here — this catches the team having been
+	// downgraded or filled by other means between invite and accept.
+	if memberErr != nil {
+		if msg := memberLimitMessage(teamID, false); msg != "" {
+			writePlanLimit(w, msg)
+			return
+		}
 	}
 
 	tx, err := db.Begin()

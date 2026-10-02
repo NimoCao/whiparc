@@ -334,6 +334,28 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     12,
+		description: "add_tier_to_templates",
+		up: func(tx sqlExecer) error {
+			// Real Pro gating for templates (product-memory 08.5 item F1),
+			// replacing the catalog's old decorative per-id-hash "Pro" badge.
+			// Plain TEXT, no inline CHECK — same reasoning as migration 11's
+			// teams.plan: validity is enforced in Go and no migration here has
+			// proven ALTER ... ADD COLUMN ... CHECK on both backends.
+			if _, err := tx.Exec("ALTER TABLE templates ADD COLUMN tier TEXT NOT NULL DEFAULT 'FREE'"); err != nil {
+				return fmt.Errorf("failed to add tier: %w", err)
+			}
+			// Databases seeded before tiers existed: apply the same curated
+			// list the seeder uses for fresh ones (proSeedTemplateTitles).
+			for title := range proSeedTemplateTitles {
+				if _, err := tx.Exec("UPDATE templates SET tier = 'PRO' WHERE author_user_id = 'whiparc_official' AND title = ?", title); err != nil {
+					return fmt.Errorf("failed to mark %q PRO: %w", title, err)
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

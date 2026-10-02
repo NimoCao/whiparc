@@ -295,6 +295,7 @@ func main() {
 
 	// Unauthenticated — polled by the reverse proxy / uptime monitor.
 	mux.HandleFunc("GET /healthz", handleHealthz)
+	mux.HandleFunc("GET /api/config", enableCORS(handleGetConfig))
 
 	// API Routes
 	mux.Handle("GET /api/projects/{id}/runs", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetRuns))))
@@ -377,6 +378,7 @@ func main() {
 
 	// Custom Nodes Routes
 	mux.HandleFunc("POST /api/custom-nodes/validate", handleValidateCustomNode)
+	mux.Handle("GET /api/projects/{id}/entitlements", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetProjectEntitlements))))
 	mux.Handle("GET /api/projects/{id}/custom-nodes", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetCustomNodes))))
 	mux.Handle("POST /api/projects/{id}/custom-nodes", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleCreateCustomNode))))
 	mux.Handle("DELETE /api/projects/{id}/custom-nodes/{nodeId}", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleDeleteCustomNode))))
