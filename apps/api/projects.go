@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -20,19 +21,33 @@ type Team struct {
 	Name      string    `json:"name"`
 	Slug      string    `json:"slug"`
 	OwnerID   string    `json:"owner_id"`
+	Plan      string    `json:"plan"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 type Project struct {
-	ID          string    `json:"id"`
-	TeamID      string    `json:"team_id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Visibility  string    `json:"visibility"`
-	CreatedBy   string    `json:"created_by"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	UserRole    string    `json:"user_role,omitempty"` // populated on details
+	ID          string     `json:"id"`
+	TeamID      string     `json:"team_id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	Visibility  string     `json:"visibility"`
+	CreatedBy   string     `json:"created_by"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
+	UserRole    string     `json:"user_role,omitempty"` // populated on details
+}
+
+// parseProjectTimestamp mirrors the RFC3339-then-legacy-layout fallback
+// already used inline for created_at/updated_at throughout this file —
+// factored out here so archived_at (nullable) doesn't need to duplicate it
+// a third time.
+func parseProjectTimestamp(s string) time.Time {
+	t, _ := time.Parse(time.RFC3339, s)
+	if t.IsZero() {
+		t, _ = time.Parse("2006-01-02 15:04:05", s)
+	}
+	return t
 }
 
 type JoinRequest struct {
@@ -56,7 +71,7 @@ func handleGetTeams(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(`
-		SELECT t.id, t.name, t.slug, t.owner_id, t.created_at 
+		SELECT t.id, t.name, t.slug, t.owner_id, t.plan, t.created_at
 		FROM teams t
 		JOIN team_members tm ON tm.team_id = t.id
 		WHERE tm.user_id = ?`, user.ID)
@@ -70,7 +85,7 @@ func handleGetTeams(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t Team
 		var createdAtStr string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Slug, &t.OwnerID, &createdAtStr); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Slug, &t.OwnerID, &t.Plan, &createdAtStr); err != nil {
 			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -165,16 +180,27 @@ func handleGetProjects(w http.ResponseWriter, r *http.Request) {
 	// made this entire query fail on Postgres — the real cause of projects
 	// never showing up after the Supabase migration even though creation
 	// succeeded.
+	// archived=1 flips the listing to archived-only (product-memory 08.5
+	// item B2) — default excludes archived projects from every existing
+	// caller (dashboard, command palette, run/activity fan-outs) without
+	// any of them needing to change.
+	archivedOnly := r.URL.Query().Get("archived") == "1" || r.URL.Query().Get("archived") == "true"
+	archivedCond := "p.archived_at IS NULL"
+	if archivedOnly {
+		archivedCond = "p.archived_at IS NOT NULL"
+	}
+
 	query := `
-		SELECT p.id, p.team_id, p.name, p.description, p.visibility, p.created_by, p.created_at, p.updated_at,
+		SELECT p.id, p.team_id, p.name, p.description, p.visibility, p.created_by, p.created_at, p.updated_at, p.archived_at,
 		       COALESCE(pm.role, CASE WHEN p.created_by = ? THEN 'ADMIN' ELSE '' END) as user_role
 		FROM projects p
 		LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = ?
 		LEFT JOIN team_members tm ON tm.team_id = p.team_id AND tm.user_id = ?
-		WHERE p.created_by = ?
+		WHERE (p.created_by = ?
 		   OR pm.user_id IS NOT NULL
 		   OR (p.visibility = 'TEAM' AND tm.user_id IS NOT NULL)
-		   OR p.visibility = 'PUBLIC'`
+		   OR p.visibility = 'PUBLIC')
+		   AND ` + archivedCond
 
 	rows, err := db.Query(query, user.ID, user.ID, user.ID, user.ID)
 	if err != nil {
@@ -187,18 +213,19 @@ func handleGetProjects(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p Project
 		var createdAtStr, updatedAtStr string
-		err := rows.Scan(&p.ID, &p.TeamID, &p.Name, &p.Description, &p.Visibility, &p.CreatedBy, &createdAtStr, &updatedAtStr, &p.UserRole)
+		var archivedAtStr sql.NullString
+		err := rows.Scan(&p.ID, &p.TeamID, &p.Name, &p.Description, &p.Visibility, &p.CreatedBy, &createdAtStr, &updatedAtStr, &archivedAtStr, &p.UserRole)
 		if err != nil {
 			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		p.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
-		if p.CreatedAt.IsZero() {
-			p.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
-		}
-		p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAtStr)
-		if p.UpdatedAt.IsZero() {
-			p.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAtStr)
+		p.CreatedAt = parseProjectTimestamp(createdAtStr)
+		p.UpdatedAt = parseProjectTimestamp(updatedAtStr)
+		if archivedAtStr.Valid {
+			t := parseProjectTimestamp(archivedAtStr.String)
+			if !t.IsZero() {
+				p.ArchivedAt = &t
+			}
 		}
 		projects = append(projects, p)
 	}
@@ -247,6 +274,10 @@ func handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	err := db.QueryRow("SELECT COUNT(*) FROM team_members WHERE team_id = ? AND user_id = ?", teamID, user.ID).Scan(&count)
 	if err != nil || count == 0 {
 		http.Error(w, "Forbidden: You are not a member of the selected team", http.StatusForbidden)
+		return
+	}
+	if msg := projectLimitMessage(teamID); msg != "" {
+		writePlanLimit(w, msg)
 		return
 	}
 
@@ -309,8 +340,9 @@ func handleGetProjectByID(w http.ResponseWriter, r *http.Request) {
 
 	var p Project
 	var createdAtStr, updatedAtStr string
-	err := db.QueryRow("SELECT id, team_id, name, description, visibility, created_by, created_at, updated_at FROM projects WHERE id = ?", projectID).Scan(
-		&p.ID, &p.TeamID, &p.Name, &p.Description, &p.Visibility, &p.CreatedBy, &createdAtStr, &updatedAtStr)
+	var archivedAtStr sql.NullString
+	err := db.QueryRow("SELECT id, team_id, name, description, visibility, created_by, created_at, updated_at, archived_at FROM projects WHERE id = ?", projectID).Scan(
+		&p.ID, &p.TeamID, &p.Name, &p.Description, &p.Visibility, &p.CreatedBy, &createdAtStr, &updatedAtStr, &archivedAtStr)
 	if err == sql.ErrNoRows {
 		http.Error(w, "Project not found", http.StatusNotFound)
 		return
@@ -319,13 +351,13 @@ func handleGetProjectByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.CreatedAt, _ = time.Parse(time.RFC3339, createdAtStr)
-	if p.CreatedAt.IsZero() {
-		p.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
-	}
-	p.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAtStr)
-	if p.UpdatedAt.IsZero() {
-		p.UpdatedAt, _ = time.Parse("2006-01-02 15:04:05", updatedAtStr)
+	p.CreatedAt = parseProjectTimestamp(createdAtStr)
+	p.UpdatedAt = parseProjectTimestamp(updatedAtStr)
+	if archivedAtStr.Valid {
+		t := parseProjectTimestamp(archivedAtStr.String)
+		if !t.IsZero() {
+			p.ArchivedAt = &t
+		}
 	}
 
 	// Fetch current user role
@@ -528,6 +560,28 @@ func handleRejectJoinRequest(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Request rejected successfully"})
 }
 
+// bestPlanForUser is the cosmetic "your plan" value shown in the sidebar
+// across the dashboard/projects/runs/credentials/templates/team pages (a
+// one-line label under the user's name, predating per-team billing). It
+// resolves to the highest plan among every team the user belongs to — not
+// just teams they own — since billing moved to teams (product-memory 08.5
+// item G1) and a user can belong to several. This is a display convenience
+// only; nothing gates on it. Returns "FREE" (never an error) so a DB hiccup
+// degrades to the harmless default rather than breaking the me endpoint.
+func bestPlanForUser(userID string) string {
+	var plan string
+	err := db.QueryRow(`
+		SELECT t.plan FROM teams t
+		JOIN team_members tm ON tm.team_id = t.id
+		WHERE tm.user_id = ?
+		ORDER BY CASE t.plan WHEN 'ENTERPRISE' THEN 3 WHEN 'PRO' THEN 2 ELSE 1 END DESC
+		LIMIT 1`, userID).Scan(&plan)
+	if err != nil {
+		return "FREE"
+	}
+	return plan
+}
+
 // GET /api/auth/me
 func handleMe(w http.ResponseWriter, r *http.Request) {
 	user, ok := GetUserFromContext(r)
@@ -538,16 +592,18 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 
 	email := user.Email
 	name := user.Name
-	plan := user.Plan
 	emailVerified := user.EmailVerified
 	var onboardingDismissedAt sql.NullTime
+	var avatarURL sql.NullString
+	var pendingEmail sql.NullString
 
-	err := db.QueryRow("SELECT email, name, plan, email_verified, onboarding_dismissed_at FROM users WHERE id = ?", user.ID).
-		Scan(&email, &name, &plan, &emailVerified, &onboardingDismissedAt)
+	err := db.QueryRow("SELECT email, name, email_verified, onboarding_dismissed_at, avatar_url, pending_email FROM users WHERE id = ?", user.ID).
+		Scan(&email, &name, &emailVerified, &onboardingDismissedAt, &avatarURL, &pendingEmail)
 	if err != nil && err != sql.ErrNoRows {
 		log.Printf("[AUTH] Warning: failed to query live user for me endpoint: %v\n", err)
 	}
 	onboardingDismissed := onboardingDismissedAt.Valid
+	plan := bestPlanForUser(user.ID)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -557,6 +613,8 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		"plan":                 plan,
 		"email_verified":       emailVerified,
 		"onboarding_dismissed": onboardingDismissed,
+		"avatar_url":           avatarURL.String,
+		"pending_email":        pendingEmail.String,
 		"user": map[string]interface{}{
 			"id":                   user.ID,
 			"email":                email,
@@ -564,6 +622,112 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 			"plan":                 plan,
 			"email_verified":       emailVerified,
 			"onboarding_dismissed": onboardingDismissed,
+			"avatar_url":           avatarURL.String,
+			"pending_email":        pendingEmail.String,
+		},
+	})
+}
+
+// PATCH /api/auth/profile — updates the caller's own display name and/or
+// avatar URL (product-memory 08.5 item G2 follow-up). Fields are optional
+// and independently updatable: omitting `avatar_url` entirely leaves it
+// untouched, while an explicit empty string clears it back to "no avatar
+// set" — the two have to be distinguishable, which is why this decodes into
+// pointers rather than plain strings.
+//
+// Scoped to a single free-text "name" field, not separate first/last name
+// columns — every other place identity is modeled in this app (the users
+// table, JWT claims, activity actor names, team rosters, mailer
+// personalization) already treats `name` as one display string, and
+// splitting it would mean migrating all of those together for a UX
+// convenience that free text already covers.
+//
+// Avatar is a pasted image URL, not a file upload — this app has no
+// object-storage integration for user content today (R2 is only used for
+// CLI binary distribution), and standing one up is a materially bigger task
+// than this endpoint. Revisit if real upload becomes worth it later.
+func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	user, ok := GetUserFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var payload struct {
+		Name      *string `json:"name"`
+		AvatarURL *string `json:"avatar_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if payload.Name != nil {
+		trimmed := strings.TrimSpace(*payload.Name)
+		if trimmed == "" {
+			http.Error(w, "Name cannot be empty", http.StatusBadRequest)
+			return
+		}
+		if len(trimmed) > 100 {
+			http.Error(w, "Name is too long (100 characters max)", http.StatusBadRequest)
+			return
+		}
+		payload.Name = &trimmed
+	}
+
+	if payload.AvatarURL != nil {
+		trimmed := strings.TrimSpace(*payload.AvatarURL)
+		if trimmed != "" {
+			parsed, err := url.ParseRequestURI(trimmed)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+				http.Error(w, "Avatar URL must be a valid http:// or https:// link", http.StatusBadRequest)
+				return
+			}
+		}
+		payload.AvatarURL = &trimmed
+	}
+
+	if payload.Name != nil {
+		if _, err := db.Exec("UPDATE users SET name = ? WHERE id = ?", *payload.Name, user.ID); err != nil {
+			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if payload.AvatarURL != nil {
+		if _, err := db.Exec("UPDATE users SET avatar_url = ? WHERE id = ?", nullIfEmpty(*payload.AvatarURL), user.ID); err != nil {
+			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	var email, name string
+	var emailVerified bool
+	var avatarURL sql.NullString
+	if err := db.QueryRow("SELECT email, name, email_verified, avatar_url FROM users WHERE id = ?", user.ID).
+		Scan(&email, &name, &emailVerified, &avatarURL); err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// name rides in the JWT (TokenClaims.Name) — re-issue so a name change
+	// is reflected immediately client-side without waiting on a separate
+	// fetchMe() round trip, same reasoning as handleResetPassword's token.
+	token, err := GenerateToken(user.ID, email, name, emailVerified)
+	if err != nil {
+		http.Error(w, "Failed to sign token: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"token": token,
+		"user": map[string]interface{}{
+			"id":             user.ID,
+			"email":          email,
+			"name":           name,
+			"plan":           bestPlanForUser(user.ID),
+			"email_verified": emailVerified,
+			"avatar_url":     avatarURL.String,
 		},
 	})
 }
@@ -727,6 +891,157 @@ func handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Project deleted successfully"})
+}
+
+// POST /api/projects/{id}/duplicate
+// product-memory 08.5 item B2. Copies name/description and the current
+// canvas state into a brand-new project; never the original's visibility —
+// a duplicate of a PUBLIC/TEAM project starts PRIVATE so it doesn't leak
+// into the source's audience before the duplicating user has reviewed it.
+// Gated at RequireProjectRole("VIEWER") in main.go: duplicating never
+// mutates the source project, so anyone who can already see it (including a
+// PUBLIC-catalog viewer with no project_members row at all) may copy it.
+func handleDuplicateProject(w http.ResponseWriter, r *http.Request) {
+	sourceID := r.PathValue("id")
+	user, ok := GetUserFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var payload struct {
+		TeamID string `json:"team_id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&payload)
+
+	var src Project
+	err := db.QueryRow("SELECT id, team_id, name, description FROM projects WHERE id = ?", sourceID).Scan(
+		&src.ID, &src.TeamID, &src.Name, &src.Description)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Project not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Defaults to the source project's own team; a caller may pass a
+	// different team_id (e.g. duplicating a PUBLIC project they don't
+	// belong to into one of their own teams).
+	teamID := strings.TrimSpace(payload.TeamID)
+	if teamID == "" {
+		teamID = src.TeamID
+	}
+
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM team_members WHERE team_id = ? AND user_id = ?", teamID, user.ID).Scan(&count)
+	if err != nil || count == 0 {
+		http.Error(w, "Forbidden: You are not a member of the destination team", http.StatusForbidden)
+		return
+	}
+	if msg := projectLimitMessage(teamID); msg != "" {
+		writePlanLimit(w, msg)
+		return
+	}
+
+	var nodesJSON, edgesJSON, viewportJSON string
+	err = db.QueryRow("SELECT nodes_json, edges_json, viewport_json FROM canvas_states WHERE project_id = ?", sourceID).Scan(
+		&nodesJSON, &edgesJSON, &viewportJSON)
+	if err == sql.ErrNoRows {
+		nodesJSON, edgesJSON, viewportJSON = "[]", "[]", `{"x":0,"y":0,"zoom":1}`
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	newID := fmt.Sprintf("proj_%d", time.Now().UnixNano())
+	newName := src.Name + " (Copy)"
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, "Failed to start transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("INSERT INTO projects (id, team_id, name, description, visibility, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+		newID, teamID, newName, src.Description, "PRIVATE", user.ID)
+	if err != nil {
+		http.Error(w, "Failed to duplicate project: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	pmID := fmt.Sprintf("pmem_%d", time.Now().UnixNano())
+	_, err = tx.Exec("INSERT INTO project_members (id, project_id, user_id, role, added_by) VALUES (?, ?, ?, ?, ?)",
+		pmID, newID, user.ID, "ADMIN", user.ID)
+	if err != nil {
+		http.Error(w, "Failed to assign project access: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	_, err = tx.Exec("INSERT INTO canvas_states (project_id, nodes_json, edges_json, viewport_json, updated_by) VALUES (?, ?, ?, ?, ?)",
+		newID, nodesJSON, edgesJSON, viewportJSON, user.ID)
+	if err != nil {
+		http.Error(w, "Failed to copy canvas state: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	insertActivityEvent(newID, user.ID, "project.created", map[string]interface{}{"name": newName, "duplicated_from": sourceID})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]string{"id": newID, "name": newName})
+}
+
+// PATCH /api/projects/{id}/archive
+// Soft-hides a project from the default GET /api/projects listing without
+// touching any of its data — the reversible alternative to delete's
+// permanent removal. RequireProjectRole("ADMIN") in main.go, same gate as
+// rename/delete.
+func handleArchiveProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	res, err := db.Exec("UPDATE projects SET archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NULL", projectID)
+	if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "Project not found or already archived", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Project archived successfully"})
+}
+
+// PATCH /api/projects/{id}/unarchive
+func handleUnarchiveProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	// Unarchiving re-occupies a slot, so it's subject to the same cap as creating.
+	var teamID string
+	if err := db.QueryRow("SELECT team_id FROM projects WHERE id = ?", projectID).Scan(&teamID); err == nil {
+		if msg := projectLimitMessage(teamID); msg != "" {
+			writePlanLimit(w, msg)
+			return
+		}
+	}
+	res, err := db.Exec("UPDATE projects SET archived_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NOT NULL", projectID)
+	if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "Project not found or not archived", http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{"message": "Project unarchived successfully"})
 }
 
 type ProjectMemberInfo struct {
@@ -1022,19 +1337,38 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 }
 
 type CredentialItem struct {
-	ID             string `json:"id"`
-	ProjectID      string `json:"project_id"`
-	Provider       string `json:"provider"`
-	Name           string `json:"name"`
-	KeyFingerprint string `json:"key_fingerprint"`
-	CreatedAt      string `json:"created_at"`
+	ID             string  `json:"id"`
+	ProjectID      string  `json:"project_id"`
+	Provider       string  `json:"provider"`
+	Name           string  `json:"name"`
+	KeyFingerprint string  `json:"key_fingerprint"`
+	ExpiresAt      *string `json:"expires_at,omitempty"`
+	CreatedAt      string  `json:"created_at"`
 }
+
+// scanCredentialItem centralizes the expires_at NULL-handling shared by
+// every query that returns a CredentialItem (project-scoped and
+// team-scoped alike) instead of duplicating the sql.NullString dance.
+func scanCredentialItem(scanner interface{ Scan(...any) error }) (CredentialItem, error) {
+	var item CredentialItem
+	var expiresAt sql.NullString
+	err := scanner.Scan(&item.ID, &item.ProjectID, &item.Provider, &item.Name, &item.KeyFingerprint, &expiresAt, &item.CreatedAt)
+	if err != nil {
+		return item, err
+	}
+	if expiresAt.Valid {
+		item.ExpiresAt = &expiresAt.String
+	}
+	return item, nil
+}
+
+const credentialItemColumns = "id, project_id, provider, name, key_fingerprint, expires_at, created_at"
 
 // GET /api/projects/{id}/credentials
 func handleGetProjectCredentials(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
 
-	rows, err := db.Query("SELECT id, project_id, provider, name, key_fingerprint, created_at FROM cloud_credentials WHERE project_id = ? ORDER BY created_at DESC", projectID)
+	rows, err := db.Query("SELECT "+credentialItemColumns+" FROM cloud_credentials WHERE project_id = ? ORDER BY created_at DESC", projectID)
 	if err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1043,8 +1377,8 @@ func handleGetProjectCredentials(w http.ResponseWriter, r *http.Request) {
 
 	var items []CredentialItem = []CredentialItem{}
 	for rows.Next() {
-		var item CredentialItem
-		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Provider, &item.Name, &item.KeyFingerprint, &item.CreatedAt); err == nil {
+		item, err := scanCredentialItem(rows)
+		if err == nil {
 			items = append(items, item)
 		}
 	}
@@ -1058,6 +1392,21 @@ func handleGetProjectCredentials(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(items)
 }
 
+// parseOptionalExpiresAt parses an optional RFC3339 expiry string shared by
+// credential create and rotate — nil/empty means "no expiry", anything else
+// must be a valid RFC3339 timestamp. database/sql converts a nil *time.Time
+// arg to SQL NULL, so callers can pass the return value straight to Exec.
+func parseOptionalExpiresAt(raw *string) (*time.Time, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, *raw)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
 // POST /api/projects/{id}/credentials
 func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
@@ -1068,9 +1417,10 @@ func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Name     string `json:"name"`
-		Provider string `json:"provider"`
-		RawData  string `json:"raw_data"`
+		Name      string  `json:"name"`
+		Provider  string  `json:"provider"`
+		RawData   string  `json:"raw_data"`
+		ExpiresAt *string `json:"expires_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
@@ -1087,6 +1437,12 @@ func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expiresAt, err := parseOptionalExpiresAt(payload.ExpiresAt)
+	if err != nil {
+		http.Error(w, "Invalid expires_at: must be an RFC3339 timestamp", http.StatusBadRequest)
+		return
+	}
+
 	cipherText, nonce, authTag, err := vault.Encrypt([]byte(payload.RawData))
 	if err != nil {
 		http.Error(w, "Vault encryption failed: "+err.Error(), http.StatusInternalServerError)
@@ -1096,8 +1452,8 @@ func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 	fingerprint := vault.Fingerprint(payload.Provider, []byte(payload.RawData))
 	credID := generateUUID()
 
-	_, err = db.Exec("INSERT INTO cloud_credentials (id, project_id, provider, name, encrypted_data, nonce, auth_tag, key_fingerprint, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		credID, projectID, payload.Provider, payload.Name, cipherText, nonce, authTag, fingerprint, user.ID)
+	_, err = db.Exec("INSERT INTO cloud_credentials (id, project_id, provider, name, encrypted_data, nonce, auth_tag, key_fingerprint, expires_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		credID, projectID, payload.Provider, payload.Name, cipherText, nonce, authTag, fingerprint, expiresAt, user.ID)
 	if err != nil {
 		http.Error(w, "Failed to save credential: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1111,6 +1467,109 @@ func handleCreateProjectCredential(w http.ResponseWriter, r *http.Request) {
 		"id":              credID,
 		"message":         "Credential saved securely",
 		"key_fingerprint": fingerprint,
+	})
+}
+
+// POST /api/projects/{id}/credentials/{credId}/rotate — product-memory 08.5
+// item D1. Re-encrypts the same credential row in place (same id) with a new
+// secret value, rather than delete+recreate, so anything referencing the
+// credential by id (e.g. a canvas node's credentialId) doesn't need updating.
+func handleRotateProjectCredential(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	credID := r.PathValue("credId")
+	user, ok := GetUserFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var payload struct {
+		RawData   string  `json:"raw_data"`
+		ExpiresAt *string `json:"expires_at"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(payload.RawData) == "" {
+		http.Error(w, "Missing raw_data in payload", http.StatusBadRequest)
+		return
+	}
+
+	expiresAt, err := parseOptionalExpiresAt(payload.ExpiresAt)
+	if err != nil {
+		http.Error(w, "Invalid expires_at: must be an RFC3339 timestamp", http.StatusBadRequest)
+		return
+	}
+
+	// provider is intentionally not caller-supplied on rotate — it's fixed
+	// at creation time (vault.Fingerprint needs it to mask the new value the
+	// same way the original was masked), and name is only needed here for
+	// the activity log.
+	var provider, name string
+	err = db.QueryRow("SELECT provider, name FROM cloud_credentials WHERE id = ? AND project_id = ?", credID, projectID).Scan(&provider, &name)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Credential not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	cipherText, nonce, authTag, err := vault.Encrypt([]byte(payload.RawData))
+	if err != nil {
+		http.Error(w, "Vault encryption failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fingerprint := vault.Fingerprint(provider, []byte(payload.RawData))
+
+	_, err = db.Exec("UPDATE cloud_credentials SET encrypted_data = ?, nonce = ?, auth_tag = ?, key_fingerprint = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?",
+		cipherText, nonce, authTag, fingerprint, expiresAt, credID, projectID)
+	if err != nil {
+		http.Error(w, "Failed to rotate credential: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	insertActivityEvent(projectID, user.ID, "credential.rotated", map[string]interface{}{"name": name, "provider": provider})
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":         "Credential rotated successfully",
+		"key_fingerprint": fingerprint,
+	})
+}
+
+// POST /api/projects/{id}/credentials/{credId}/test — product-memory 08.5
+// item D3. Decrypts the credential server-side and makes a real, read-only
+// call against the provider's own API to confirm it authenticates — never
+// returns the decrypted value itself, only a success/message summary.
+func handleTestProjectCredential(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("id")
+	credID := r.PathValue("credId")
+
+	var provider string
+	var encryptedData, nonce, authTag []byte
+	err := db.QueryRow("SELECT provider, encrypted_data, nonce, auth_tag FROM cloud_credentials WHERE id = ? AND project_id = ?", credID, projectID).Scan(&provider, &encryptedData, &nonce, &authTag)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Credential not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	decrypted, err := vault.Decrypt(encryptedData, nonce, authTag)
+	if err != nil {
+		http.Error(w, "Failed to decrypt credential: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	success, message := testCredentialConnection(provider, decrypted)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": success,
+		"message": message,
 	})
 }
 

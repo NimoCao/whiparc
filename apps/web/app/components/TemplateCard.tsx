@@ -8,6 +8,7 @@ import type { Node, Edge } from '@xyflow/react';
 import { TemplateCanvasPreview } from './TemplateCanvasPreview';
 import { BlueprintCorners } from './ui/BlueprintCorners';
 import type { Template } from '../lib/types';
+import { useProTemplateAccess } from '../lib/usePlan';
 import './ui/blueprint.css';
 import '../templates/templates.css';
 
@@ -29,23 +30,6 @@ function deriveDifficulty(nodeCount: number): 'beginner' | 'intermediate' | 'adv
   return 'advanced';
 }
 
-// "Pro" tier has no real backend field either, and product-memory records
-// an explicit decision to avoid implying paid listings before a real
-// credits system exists. Kept purely decorative: a deterministic (not
-// random, so it doesn't flicker between renders, and shared with
-// TemplatesPageV2's Pricing filter so the two stay consistent) hash of the
-// template id marks roughly 1/3 of templates "Pro" with a derived credit
-// number.
-export function hashSeed(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-export function deriveProStatus(id: string): { isPro: boolean; credits: number } {
-  const seed = hashSeed(id);
-  return { isPro: seed % 3 === 0, credits: 20 + (seed % 5) * 10 };
-}
-
 // Catalog grid card: the template's own canvas graph as the card body (a
 // static, non-interactive preview — see TemplateCanvasPreview's `interactive`
 // prop), a "Show details" toggle that animates the description/tags open
@@ -54,7 +38,6 @@ export function deriveProStatus(id: string): { isPro: boolean; credits: number }
 // product-memory 10.1).
 export function TemplateCard({ template }: TemplateCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const [showUnlockNote, setShowUnlockNote] = useState(false);
 
   const { nodes, edges } = useMemo(() => {
     try {
@@ -67,7 +50,12 @@ export function TemplateCard({ template }: TemplateCardProps) {
   }, [template.nodes_json, template.edges_json]);
 
   const difficulty = deriveDifficulty(nodes.length);
-  const { isPro, credits } = useMemo(() => deriveProStatus(template.id), [template.id]);
+  // Real tier (templates.tier, curated server-side). The PRO badge/lock only
+  // shows where plan limits are live — a self-hosted install has no way to
+  // upgrade, so it treats every template as usable.
+  const { enforced, canUsePro } = useProTemplateAccess();
+  const isPro = enforced && template.tier === 'PRO';
+  const locked = isPro && !canUsePro;
 
   return (
     <div className="wp-blueprint" style={{ position: 'relative', display: 'flex', flexDirection: 'column', background: 'var(--panel)', overflow: 'hidden' }}>
@@ -168,16 +156,15 @@ export function TemplateCard({ template }: TemplateCardProps) {
           <span style={{ padding: '2px 7px', color: DIFF_COLOR[difficulty], border: `1px solid ${DIFF_COLOR[difficulty]}` }}>{difficulty}</span>
         </div>
 
-        {isPro ? (
-          <button
-            type="button"
-            onClick={() => setShowUnlockNote(true)}
+        {locked ? (
+          <Link
+            href={`/templates/${template.id}`}
             className="wp-templates-unlockbtn"
-            style={{ height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-display)', border: '1px solid var(--amber)', color: 'var(--amber)', background: 'transparent', cursor: 'pointer' }}
+            style={{ height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-display)', border: '1px solid var(--amber)', color: 'var(--amber)', background: 'transparent' }}
           >
             <Icon icon="lucide:lock" width={12} />
-            Unlock · {credits} credits
-          </button>
+            Pro · Upgrade to unlock
+          </Link>
         ) : (
           <Link
             href={`/templates/${template.id}`}
@@ -186,11 +173,6 @@ export function TemplateCard({ template }: TemplateCardProps) {
           >
             Use template
           </Link>
-        )}
-        {showUnlockNote && (
-          <p style={{ margin: 0, fontSize: 11, color: 'var(--amber)', background: 'color-mix(in srgb, var(--amber) 12%, transparent)', border: '1px solid var(--amber)', padding: '6px 8px' }}>
-            Credits &amp; Pro templates are launching in a future phase — this one will be unlockable soon.
-          </p>
         )}
       </div>
     </div>

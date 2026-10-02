@@ -73,15 +73,114 @@ func GetUserFromContext(r *http.Request) (*TokenClaims, bool) {
 	return claims, ok
 }
 
-// RequireProjectRole checks if the user has access to the project with at least the minimum role (Viewer <= Editor <= Admin)
-// role level helper mapping: Viewer: 1, Editor: 2, Admin: 3
-func RequireProjectRole(minRole string) func(http.Handler) http.Handler {
+// checkProjectAccess implements the access rule RequireProjectRole enforces
+// as middleware (Viewer <= Editor <= Admin), factored out so a handler keyed
+// by a resource ID other than the project ID itself — e.g. handleGetRunByID
+// and handleWebSocket, both keyed by run ID — can perform the identical
+// check once it has resolved that resource's project ID. Returns allowed;
+// status/message are only meaningful when allowed is false.
+func checkProjectAccess(userID, projectID, minRole string) (allowed bool, status int, message string) {
 	roleLevels := map[string]int{
 		"VIEWER": 1,
 		"EDITOR": 2,
 		"ADMIN":  3,
 	}
 
+	var visibility, createdBy, teamId string
+	err := db.QueryRow("SELECT visibility, created_by, team_id FROM projects WHERE id = ?", projectID).Scan(&visibility, &createdBy, &teamId)
+	if err != nil {
+		return false, http.StatusNotFound, "Project not found"
+	}
+
+	// If user is the creator of the project, they have full access (Admin level)
+	if createdBy == userID {
+		return true, 0, ""
+	}
+
+	// If project is public and minRole is VIEWER, allow access
+	if visibility == "PUBLIC" && minRole == "VIEWER" {
+		return true, 0, ""
+	}
+
+	// Query project memberships
+	var userRole string
+	err = db.QueryRow("SELECT role FROM project_members WHERE project_id = ? AND user_id = ?", projectID, userID).Scan(&userRole)
+	if err != nil {
+		// If not a direct project member, check if they are in the team that owns the project
+		var teamRole string
+		err = db.QueryRow("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?", teamId, userID).Scan(&teamRole)
+		if err == nil && (teamRole == "OWNER" || teamRole == "ADMIN") {
+			// Team admins/owners act as project admins
+			return true, 0, ""
+		}
+		return false, http.StatusForbidden, "Forbidden: Access denied to this project"
+	}
+
+	if roleLevels[userRole] < roleLevels[minRole] {
+		return false, http.StatusForbidden, "Forbidden: Insufficient privileges"
+	}
+
+	return true, 0, ""
+}
+
+// checkTeamAccess is checkProjectAccess's team-level twin (Member <= Admin
+// <= Owner), used by RequireTeamRole and by handlers that need to check
+// team membership for a resource key by something other than the team ID
+// itself. Returns allowed; status/message are only meaningful when allowed
+// is false.
+func checkTeamAccess(userID, teamID, minRole string) (allowed bool, status int, message string) {
+	roleLevels := map[string]int{
+		"MEMBER": 1,
+		"ADMIN":  2,
+		"OWNER":  3,
+	}
+
+	var exists string
+	if err := db.QueryRow("SELECT id FROM teams WHERE id = ?", teamID).Scan(&exists); err != nil {
+		return false, http.StatusNotFound, "Team not found"
+	}
+
+	var userRole string
+	err := db.QueryRow("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?", teamID, userID).Scan(&userRole)
+	if err != nil {
+		return false, http.StatusForbidden, "Forbidden: Access denied to this team"
+	}
+
+	if roleLevels[userRole] < roleLevels[minRole] {
+		return false, http.StatusForbidden, "Forbidden: Insufficient privileges"
+	}
+
+	return true, 0, ""
+}
+
+// RequireTeamRole checks if the user has access to the team with at least the minimum role (Member <= Admin <= Owner)
+func RequireTeamRole(minRole string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, ok := GetUserFromContext(r)
+			if !ok {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+
+			teamId := r.PathValue("id")
+			if teamId == "" {
+				http.Error(w, "Bad Request: Team ID is required", http.StatusBadRequest)
+				return
+			}
+
+			if allowed, status, message := checkTeamAccess(user.ID, teamId, minRole); !allowed {
+				http.Error(w, message, status)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireProjectRole checks if the user has access to the project with at least the minimum role (Viewer <= Editor <= Admin)
+func RequireProjectRole(minRole string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user, ok := GetUserFromContext(r)
@@ -104,47 +203,8 @@ func RequireProjectRole(minRole string) func(http.Handler) http.Handler {
 				return
 			}
 
-			// 1. Check if the project is public. If it is public and minRole is VIEWER, let them through
-			var visibility string
-			var createdBy string
-			var teamId string
-			err := db.QueryRow("SELECT visibility, created_by, team_id FROM projects WHERE id = ?", projectId).Scan(&visibility, &createdBy, &teamId)
-			if err != nil {
-				http.Error(w, "Project not found", http.StatusNotFound)
-				return
-			}
-
-			// If user is the creator of the project, they have full access (Admin level)
-			if createdBy == user.ID {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// If project is public and minRole is VIEWER, allow access
-			if visibility == "PUBLIC" && minRole == "VIEWER" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// 2. Query project memberships
-			var userRole string
-			err = db.QueryRow("SELECT role FROM project_members WHERE project_id = ? AND user_id = ?", projectId, user.ID).Scan(&userRole)
-			if err != nil {
-				// If not a direct project member, check if they are in the team that owns the project
-				var teamRole string
-				err = db.QueryRow("SELECT role FROM team_members WHERE team_id = ? AND user_id = ?", teamId, user.ID).Scan(&teamRole)
-				if err == nil && (teamRole == "OWNER" || teamRole == "ADMIN") {
-					// Team admins/owners act as project admins
-					next.ServeHTTP(w, r)
-					return
-				}
-
-				http.Error(w, "Forbidden: Access denied to this project", http.StatusForbidden)
-				return
-			}
-
-			if roleLevels[userRole] < roleLevels[minRole] {
-				http.Error(w, "Forbidden: Insufficient privileges", http.StatusForbidden)
+			if allowed, status, message := checkProjectAccess(user.ID, projectId, minRole); !allowed {
+				http.Error(w, message, status)
 				return
 			}
 

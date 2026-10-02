@@ -11,6 +11,7 @@ export interface Project {
   created_by: string;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
   user_role: string;
 }
 
@@ -37,6 +38,8 @@ export interface Template {
   install_count: number;
   created_at: string;
   updated_at: string;
+  // Curated server-side (apps/api/templates.go proSeedTemplateTitles); FREE unless marked PRO.
+  tier?: 'FREE' | 'PRO';
   nodes_json?: string;
   edges_json?: string;
   viewport_json?: string;
@@ -55,6 +58,7 @@ export interface TemplateListResponse {
 // plausible-looking values.
 export interface PipelineRun {
   id: string;
+  projectId?: string | null;
   status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
   logs: string;
   canvas: string;

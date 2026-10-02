@@ -5,10 +5,11 @@ import Link from 'next/link';
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../store/useAuthStore';
 import ProfileMenu from '../components/ProfileMenu';
-import { TemplateCard, deriveProStatus } from '../components/TemplateCard';
+import { TemplateCard } from '../components/TemplateCard';
+import { usePlanEnforcement } from '../lib/usePlan';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
-import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon } from '../dashboard/NavIcons';
+import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, ShieldIcon, BookIcon } from '../dashboard/NavIcons';
 import { BrandLogo } from '../components/brand/BrandLogo';
 import type { Template, TemplateListResponse } from '../lib/types';
 import '../components/ui/blueprint.css';
@@ -26,6 +27,7 @@ const NAV_ITEMS: { key: string; label: string; href: string; icon: React.ReactNo
   { key: 'runs', label: 'Runs', href: '/runs', icon: <ActivityIcon /> },
   { key: 'credentials', label: 'Credentials', href: '/credentials', icon: <LockIcon /> },
   { key: 'team', label: 'Team', href: '/team', icon: <UsersIcon /> },
+  { key: 'account', label: 'Account', href: '/account', icon: <ShieldIcon /> },
   { key: 'docs', label: 'Docs', href: '/docs', icon: <BookIcon /> },
 ];
 
@@ -49,6 +51,7 @@ export default function TemplatesPageV2() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
   const [pricingFilter, setPricingFilter] = useState<PricingFilter>('all');
+  const planEnforced = usePlanEnforcement();
   const [sortMode] = useState<SortMode>('newest');
   const [showImportNote, setShowImportNote] = useState(false);
 
@@ -88,7 +91,7 @@ export default function TemplatesPageV2() {
         t.title.toLowerCase().includes(q) ||
         t.description.toLowerCase().includes(q) ||
         t.tags.some((tag) => tag.toLowerCase().includes(q));
-      const matchesPricing = pricingFilter === 'all' || (pricingFilter === 'pro' ? deriveProStatus(t.id).isPro : !deriveProStatus(t.id).isPro);
+      const matchesPricing = pricingFilter === 'all' || (pricingFilter === 'pro' ? t.tier === 'PRO' : t.tier !== 'PRO');
       return matchesCategory && matchesQuery && matchesPricing;
     });
     list = [...list].sort((a, b) =>
@@ -235,6 +238,7 @@ export default function TemplatesPageV2() {
                 );
               })}
             </div>
+            {planEnforced && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span style={labelStyle}>Pricing</span>
               {(['all', 'free', 'pro'] as const).map((tier) => {
@@ -261,6 +265,7 @@ export default function TemplatesPageV2() {
                 );
               })}
             </div>
+            )}
           </div>
 
           {isLoading ? (

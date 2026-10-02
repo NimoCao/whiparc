@@ -144,33 +144,73 @@ func oauthFrontendBase() string {
 // map pattern already used elsewhere in this file for run-tracking and
 // workspace sync. Fine at this app's current scale; would need to move to
 // the DB (or Redis) behind multiple API instances.
+//
+// Beyond the CSRF nonce itself, each entry also carries two things that
+// need to survive the round-trip to the provider and back (product-memory
+// 08.5 items G2/G5):
+//   - redirect: where to send the browser after a normal login, so the
+//     continuation a password-login already supports (e.g. resuming a
+//     template fork) doesn't silently drop for OAuth.
+//   - linkUserID: set only when this round-trip started from the /account
+//     page's "Connect a provider" action (via a link ticket, see
+//     identities.go) — turns handleOAuthCallback into a "link this identity
+//     to my already-signed-in account" flow instead of a login/signup one.
 var (
-	oauthStates      = make(map[string]time.Time)
+	oauthStates      = make(map[string]oauthStateEntry)
 	oauthStatesMutex sync.Mutex
 )
 
-func generateOAuthState() string {
+type oauthStateEntry struct {
+	expiry     time.Time
+	redirect   string
+	linkUserID string
+}
+
+func generateOAuthState(redirect, linkUserID string) string {
 	b := make([]byte, 24)
 	_, _ = rand.Read(b)
 	state := hex.EncodeToString(b)
 
 	oauthStatesMutex.Lock()
-	oauthStates[state] = time.Now().Add(10 * time.Minute)
+	oauthStates[state] = oauthStateEntry{
+		expiry:     time.Now().Add(10 * time.Minute),
+		redirect:   redirect,
+		linkUserID: linkUserID,
+	}
 	oauthStatesMutex.Unlock()
 
 	return state
 }
 
-func consumeOAuthState(state string) bool {
+func consumeOAuthState(state string) (oauthStateEntry, bool) {
 	oauthStatesMutex.Lock()
 	defer oauthStatesMutex.Unlock()
 
-	expiry, ok := oauthStates[state]
+	entry, ok := oauthStates[state]
 	if !ok {
-		return false
+		return oauthStateEntry{}, false
 	}
 	delete(oauthStates, state) // single-use
-	return time.Now().Before(expiry)
+	if time.Now().After(entry.expiry) {
+		return oauthStateEntry{}, false
+	}
+	return entry, true
+}
+
+// isSafeRedirectPath rejects anything that isn't a plain same-origin path —
+// no scheme, no "//" (protocol-relative), no backslash tricks — so a
+// crafted redirect= query param can never turn this into an open redirect.
+func isSafeRedirectPath(path string) bool {
+	if path == "" || path[0] != '/' {
+		return false
+	}
+	if len(path) > 1 && (path[1] == '/' || path[1] == '\\') {
+		return false
+	}
+	if strings.Contains(path, "://") {
+		return false
+	}
+	return true
 }
 
 // --- HTTP handlers ---
@@ -187,7 +227,22 @@ func handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state := generateOAuthState()
+	redirect := r.URL.Query().Get("redirect")
+	if redirect != "" && !isSafeRedirectPath(redirect) {
+		redirect = ""
+	}
+
+	var linkUserID string
+	if ticket := r.URL.Query().Get("link_ticket"); ticket != "" {
+		userID, ok := consumeLinkTicket(ticket)
+		if !ok {
+			http.Error(w, "This link session has expired — go back to Account Security and try again.", http.StatusBadRequest)
+			return
+		}
+		linkUserID = userID
+	}
+
+	state := generateOAuthState(redirect, linkUserID)
 	redirectURI := oauthRedirectBase() + "/api/auth/" + provider + "/callback"
 
 	params := url.Values{}
@@ -211,7 +266,8 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !consumeOAuthState(r.URL.Query().Get("state")) {
+	stateEntry, ok := consumeOAuthState(r.URL.Query().Get("state"))
+	if !ok {
 		http.Error(w, "Invalid or expired OAuth state", http.StatusBadRequest)
 		return
 	}
@@ -237,6 +293,20 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A link-flow round-trip (started from /account, see identities.go's
+	// link tickets) attaches this provider identity to the already-signed-in
+	// user instead of logging in/creating a new account — the person never
+	// gets a new token here, they're already holding a valid one.
+	if stateEntry.linkUserID != "" {
+		errCode := linkOAuthIdentity(stateEntry.linkUserID, provider, providerUserID, email)
+		redirectURL := oauthFrontendBase() + "/account?linked=" + provider
+		if errCode != "" {
+			redirectURL = oauthFrontendBase() + "/account?linkError=" + errCode
+		}
+		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+		return
+	}
+
 	user, err := findOrCreateOAuthUser(provider, providerUserID, email, emailVerified, name)
 	if err != nil {
 		log.Printf("[OAUTH] Failed to resolve user for %s: %v\n", provider, err)
@@ -244,16 +314,67 @@ func handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := GenerateToken(user.ID, user.Email, user.Name, user.Plan, user.EmailVerified)
+	token, err := GenerateToken(user.ID, user.Email, user.Name, user.EmailVerified)
 	if err != nil {
 		log.Printf("[OAUTH] Failed to sign token: %v\n", err)
 		http.Error(w, "Failed to sign token: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Challenge #7: hand off via URL fragment, never a query param.
-	redirectURL := oauthFrontendBase() + "/oauth/callback#token=" + url.QueryEscape(token)
+	// Challenge #7: hand off via URL fragment, never a query param. The
+	// (already-validated-safe) redirect rides along the same way — a
+	// fragment, so it's never sent to any server either.
+	fragment := "token=" + url.QueryEscape(token)
+	if stateEntry.redirect != "" {
+		fragment += "&redirect=" + url.QueryEscape(stateEntry.redirect)
+	}
+	redirectURL := oauthFrontendBase() + "/oauth/callback#" + fragment
 	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+}
+
+// linkOAuthIdentity attaches a provider identity to an existing,
+// already-authenticated user. Returns "" on success, or a short error code
+// for the /account page to render: "already_linked" if that exact provider
+// identity already belongs to a *different* account (never silently
+// reassign it), "provider_linked" if the caller already has a *different*
+// identity linked for this same provider (oauth_identities' own
+// UNIQUE(user_id, provider) constraint), or "" treated as success if it's
+// already linked to this same account (idempotent, not an error).
+func linkOAuthIdentity(userID, provider, providerUserID, email string) string {
+	var existingUserID string
+	err := db.QueryRow(
+		"SELECT user_id FROM oauth_identities WHERE provider = ? AND provider_user_id = ?",
+		provider, providerUserID,
+	).Scan(&existingUserID)
+	if err == nil {
+		if existingUserID == userID {
+			return ""
+		}
+		return "already_linked"
+	}
+	if err != sql.ErrNoRows {
+		log.Printf("[OAUTH] Link lookup failed for %s: %v\n", provider, err)
+		return "link_failed"
+	}
+
+	var alreadyHasProvider bool
+	if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM oauth_identities WHERE user_id = ? AND provider = ?)", userID, provider).Scan(&alreadyHasProvider); err != nil {
+		log.Printf("[OAUTH] Link provider-check failed: %v\n", err)
+		return "link_failed"
+	}
+	if alreadyHasProvider {
+		return "provider_linked"
+	}
+
+	identityID := fmt.Sprintf("oid_%d", time.Now().UnixNano())
+	if _, err := db.Exec(
+		"INSERT INTO oauth_identities (id, user_id, provider, provider_user_id, email) VALUES (?, ?, ?, ?, ?)",
+		identityID, userID, provider, providerUserID, email,
+	); err != nil {
+		log.Printf("[OAUTH] Failed to link identity: %v\n", err)
+		return "link_failed"
+	}
+	return ""
 }
 
 // --- Provider HTTP calls ---
@@ -449,7 +570,6 @@ type oauthResolvedUser struct {
 	ID            string
 	Email         string
 	Name          string
-	Plan          string
 	EmailVerified bool
 }
 
@@ -528,7 +648,7 @@ func findOrCreateOAuthUser(provider, providerUserID, email string, emailVerified
 
 func loadOAuthResolvedUser(userID string) (*oauthResolvedUser, error) {
 	var u oauthResolvedUser
-	err := db.QueryRow("SELECT id, email, name, plan, email_verified FROM users WHERE id = ?", userID).Scan(&u.ID, &u.Email, &u.Name, &u.Plan, &u.EmailVerified)
+	err := db.QueryRow("SELECT id, email, name, email_verified FROM users WHERE id = ?", userID).Scan(&u.ID, &u.Email, &u.Name, &u.EmailVerified)
 	if err != nil {
 		return nil, err
 	}

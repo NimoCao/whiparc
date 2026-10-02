@@ -33,6 +33,9 @@ export function TemplateDetailContent({ id, variant }: TemplateDetailContentProp
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isForking, setIsForking] = useState(false);
   const [forkError, setForkError] = useState<string | null>(null);
+  // 402 = blocked by plan (Pro template, or the Free project cap): same error
+  // box, plus a way to actually do something about it.
+  const [forkNeedsUpgrade, setForkNeedsUpgrade] = useState(false);
   const [showContributeComingSoon, setShowContributeComingSoon] = useState(false);
 
   useEffect(() => {
@@ -94,6 +97,7 @@ export function TemplateDetailContent({ id, variant }: TemplateDetailContentProp
       return;
     }
     setForkError(null);
+    setForkNeedsUpgrade(false);
     setIsForking(true);
     try {
       const token = useAuthStore.getState().token;
@@ -101,6 +105,10 @@ export function TemplateDetailContent({ id, variant }: TemplateDetailContentProp
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 402) {
+        setForkNeedsUpgrade(true);
+        throw new Error((await res.text().catch(() => '')).trim() || 'Upgrade to Pro to use this template.');
+      }
       if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
       const data: { project_id: string } = await res.json();
       // Same reasoning as above — hard navigation so the popup can't get
@@ -263,7 +271,16 @@ export function TemplateDetailContent({ id, variant }: TemplateDetailContentProp
         </div>
 
         {forkError && (
-          <p style={{ margin: 0, fontSize: 11.5, color: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 10%, transparent)', border: '1px solid var(--danger)', padding: '6px 10px' }}>{forkError}</p>
+          <p style={{ margin: 0, fontSize: 11.5, color: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 10%, transparent)', border: '1px solid var(--danger)', padding: '6px 10px' }}>{forkError}
+            {forkNeedsUpgrade && (
+              <>
+                {' '}
+                <a href="/team" style={{ color: 'var(--accent-ink)', textDecoration: 'underline' }}>
+                  Upgrade
+                </a>
+              </>
+            )}
+          </p>
         )}
         {showContributeComingSoon && (
           <p style={{ margin: 0, fontSize: 11.5, color: 'var(--amber)', background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid var(--amber)', padding: '6px 10px' }}>

@@ -8,7 +8,7 @@ import ProfileMenu from '../components/ProfileMenu';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
-import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, BookIcon } from '../dashboard/NavIcons';
+import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, ShieldIcon, BookIcon } from '../dashboard/NavIcons';
 import { BrandLogo } from '../components/brand/BrandLogo';
 import type { Project } from '../lib/types';
 import '../components/ui/blueprint.css';
@@ -23,6 +23,7 @@ const NAV_ITEMS: { key: string; label: string; href: string; icon: React.ReactNo
   { key: 'runs', label: 'Runs', href: '/runs', icon: <ActivityIcon /> },
   { key: 'credentials', label: 'Credentials', href: '/credentials', icon: <LockIcon /> },
   { key: 'team', label: 'Team', href: '/team', icon: <UsersIcon /> },
+  { key: 'account', label: 'Account', href: '/account', icon: <ShieldIcon /> },
   { key: 'docs', label: 'Docs', href: '/docs', icon: <BookIcon /> },
 ];
 
@@ -35,10 +36,18 @@ interface CredentialItem {
   provider: 'AWS' | 'GCP' | 'SSH' | 'GITHUB';
   name: string;
   key_fingerprint: string;
+  expires_at?: string | null;
   created_at: string;
 }
+// Mirrors apps/api/teams.go's TeamCredentialItem — the team-scoped
+// aggregate endpoint returns project_name directly, so this page no longer
+// needs a separate per-project fan-out just to label each card.
 interface CredRow extends CredentialItem {
   projectName: string;
+}
+interface Team {
+  id: string;
+  name: string;
 }
 
 type CategoryFilter = 'all' | 'cloud' | 'ssh' | 'token';
@@ -59,6 +68,25 @@ function timeAgo(iso: string): string {
   return days === 1 ? '1d ago' : `${days}d ago`;
 }
 
+type ExpiryStatus = 'none' | 'active' | 'expiring' | 'expired';
+const EXPIRING_SOON_DAYS = 14;
+
+function expiryStatus(expiresAt: string | null | undefined): ExpiryStatus {
+  if (!expiresAt) return 'none';
+  const then = new Date(expiresAt).getTime();
+  if (Number.isNaN(then)) return 'none';
+  const daysLeft = (then - Date.now()) / (24 * 60 * 60 * 1000);
+  if (daysLeft < 0) return 'expired';
+  if (daysLeft <= EXPIRING_SOON_DAYS) return 'expiring';
+  return 'active';
+}
+
+const EXPIRY_BADGE: Record<Exclude<ExpiryStatus, 'none'>, { label: (d: string) => string; bg: string; fg: string }> = {
+  active: { label: (d) => `Expires ${d}`, bg: 'transparent', fg: 'var(--ink3)' },
+  expiring: { label: (d) => `Expires ${d}`, bg: 'color-mix(in srgb, var(--amber) 12%, transparent)', fg: 'var(--amber)' },
+  expired: { label: () => 'Expired', bg: 'color-mix(in srgb, var(--danger) 12%, transparent)', fg: 'var(--danger)' },
+};
+
 export default function CredentialsPageV2() {
   const { user, token, hasHydrated } = useAuthStore();
   const isLoggedIn = hasHydrated && !!user;
@@ -71,30 +99,40 @@ export default function CredentialsPageV2() {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [showRotateNote, setShowRotateNote] = useState(false);
+  const [rotateTarget, setRotateTarget] = useState<CredRow | null>(null);
+  const [testState, setTestState] = useState<Record<string, { pending: boolean; success?: boolean; message?: string }>>({});
 
   const loadAll = async () => {
     if (!token) return;
     setIsLoading(true);
     try {
-      const projRes = await fetch(`${API_URL}/api/projects`, { headers: { Authorization: `Bearer ${token}` } });
+      const [projRes, teamsRes] = await Promise.all([
+        fetch(`${API_URL}/api/projects`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/teams`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
       if (!projRes.ok) throw new Error(`Request failed with status ${projRes.status}`);
+      if (!teamsRes.ok) throw new Error(`Request failed with status ${teamsRes.status}`);
       const projs: Project[] = await projRes.json();
+      const teams: Team[] = await teamsRes.json();
       setProjects(projs);
 
-      const perProject = await Promise.all(
-        projs.map(async (p) => {
+      // One request per team (typically 1-2) instead of one per project —
+      // GET /api/teams/{id}/credentials (08.5 item E3) already joins in the
+      // project name, replacing the old GET /api/projects/{id}/credentials
+      // fan-out this page used to do.
+      const perTeam = await Promise.all(
+        teams.map(async (t) => {
           try {
-            const res = await fetch(`${API_URL}/api/projects/${p.id}/credentials`, { headers: { Authorization: `Bearer ${token}` } });
+            const res = await fetch(`${API_URL}/api/teams/${t.id}/credentials`, { headers: { Authorization: `Bearer ${token}` } });
             if (!res.ok) return [] as CredRow[];
-            const items: CredentialItem[] = await res.json();
-            return items.map((c) => ({ ...c, projectName: p.name }));
+            const items: (CredentialItem & { project_name: string })[] = await res.json();
+            return items.map((c) => ({ ...c, projectName: c.project_name }));
           } catch {
             return [] as CredRow[];
           }
         })
       );
-      setCreds(perProject.flat().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
+      setCreds(perTeam.flat().sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
       setLoadError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load credentials.';
@@ -123,6 +161,22 @@ export default function CredentialsPageV2() {
       setCreds((prev) => prev.filter((c) => c.id !== cred.id));
     } catch (err) {
       window.alert(err instanceof Error ? err.message : 'Failed to revoke credential.');
+    }
+  };
+
+  const handleTestConnection = async (cred: CredRow) => {
+    if (!token) return;
+    setTestState((prev) => ({ ...prev, [cred.id]: { pending: true } }));
+    try {
+      const res = await fetch(`${API_URL}/api/projects/${cred.project_id}/credentials/${cred.id}/test`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+      const data: { success: boolean; message: string } = await res.json();
+      setTestState((prev) => ({ ...prev, [cred.id]: { pending: false, success: data.success, message: data.message } }));
+    } catch (err) {
+      setTestState((prev) => ({ ...prev, [cred.id]: { pending: false, success: false, message: err instanceof Error ? err.message : 'Failed to test credential.' } }));
     }
   };
 
@@ -263,42 +317,54 @@ export default function CredentialsPageV2() {
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 14 }}>
-              {visibleCreds.map((c) => (
-                <div key={c.id} className="wp-blueprint" style={{ position: 'relative', background: 'var(--panel)', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <BlueprintCorners />
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                      <span style={{ width: 28, height: 28, flexShrink: 0, border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-ink)' }}>
-                        <Icon icon={ICON_OF[c.provider]} width={15} />
-                      </span>
-                      <div>
-                        <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, color: 'var(--ink)' }}>{c.name}</p>
-                        <p style={{ margin: '2px 0 0', fontFamily: 'var(--font-mono-marketing)', fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--ink3)' }}>{c.provider}</p>
+              {visibleCreds.map((c) => {
+                const status = expiryStatus(c.expires_at);
+                const test = testState[c.id];
+                return (
+                  <div key={c.id} className="wp-blueprint" style={{ position: 'relative', background: 'var(--panel)', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <BlueprintCorners />
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                        <span style={{ width: 28, height: 28, flexShrink: 0, border: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-ink)' }}>
+                          <Icon icon={ICON_OF[c.provider]} width={15} />
+                        </span>
+                        <div>
+                          <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, color: 'var(--ink)' }}>{c.name}</p>
+                          <p style={{ margin: '2px 0 0', fontFamily: 'var(--font-mono-marketing)', fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--ink3)' }}>{c.provider}</p>
+                        </div>
+                      </div>
+                      {status !== 'none' && (
+                        <span style={{ fontSize: 10.5, fontWeight: 600, padding: '2px 7px', flexShrink: 0, background: EXPIRY_BADGE[status].bg, color: EXPIRY_BADGE[status].fg, border: status === 'active' ? '1px solid var(--line)' : 'none' }}>
+                          {EXPIRY_BADGE[status].label(new Date(c.expires_at as string).toLocaleDateString())}
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ margin: 0, fontSize: 13, color: 'var(--ink2)' }}>
+                      Used by <Link href={`/workspace?project=${c.project_id}`} className="wp-credentials-navlink" style={{ color: 'var(--accent-ink)' }}>{c.projectName}</Link>
+                    </p>
+                    {test && (
+                      <p style={{ margin: 0, fontSize: 11.5, color: test.pending ? 'var(--ink3)' : test.success ? 'var(--success)' : 'var(--danger)', background: test.pending ? 'transparent' : `color-mix(in srgb, ${test.success ? 'var(--success)' : 'var(--danger)'} 10%, transparent)`, padding: test.pending ? 0 : '6px 8px' }}>
+                        {test.pending ? 'Testing connection…' : test.message}
+                      </p>
+                    )}
+                    <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 11, color: 'var(--ink3)' }}>created {timeAgo(c.created_at)}</span>
+                      <div style={{ display: 'flex', gap: 12 }}>
+                        <button type="button" onClick={() => handleTestConnection(c)} disabled={test?.pending} className="wp-credentials-navlink" style={{ fontSize: 12.5, color: 'var(--ink2)', background: 'none', border: 0, cursor: test?.pending ? 'default' : 'pointer' }}>
+                          Test connection
+                        </button>
+                        <button type="button" onClick={() => setRotateTarget(c)} className="wp-credentials-navlink" style={{ fontSize: 12.5, color: 'var(--accent-ink)', background: 'none', border: 0, cursor: 'pointer' }}>
+                          Rotate
+                        </button>
+                        <button type="button" onClick={() => handleRevoke(c)} style={{ fontSize: 12.5, color: 'var(--danger)', background: 'none', border: 0, cursor: 'pointer' }}>
+                          Revoke
+                        </button>
                       </div>
                     </div>
                   </div>
-                  <p style={{ margin: 0, fontSize: 13, color: 'var(--ink2)' }}>
-                    Used by <Link href={`/workspace?project=${c.project_id}`} className="wp-credentials-navlink" style={{ color: 'var(--accent-ink)' }}>{c.projectName}</Link>
-                  </p>
-                  <div style={{ marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 11, color: 'var(--ink3)' }}>created {timeAgo(c.created_at)}</span>
-                    <div style={{ display: 'flex', gap: 12 }}>
-                      <button type="button" onClick={() => setShowRotateNote(true)} className="wp-credentials-navlink" style={{ fontSize: 12.5, color: 'var(--accent-ink)', background: 'none', border: 0, cursor: 'pointer' }}>
-                        Rotate
-                      </button>
-                      <button type="button" onClick={() => handleRevoke(c)} style={{ fontSize: 12.5, color: 'var(--danger)', background: 'none', border: 0, cursor: 'pointer' }}>
-                        Revoke
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
-          )}
-          {showRotateNote && (
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--amber)', background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid var(--amber)', padding: '6px 10px', width: 'fit-content' }}>
-              Rotating a credential in place is launching in a future phase — revoke and create a new one for now.
-            </p>
           )}
         </div>
       </main>
@@ -310,6 +376,24 @@ export default function CredentialsPageV2() {
           onClose={() => setIsCreateOpen(false)}
           onCreated={() => {
             setIsCreateOpen(false);
+            loadAll();
+          }}
+        />
+      )}
+      {rotateTarget && (
+        <RotateCredentialModal
+          token={token}
+          cred={rotateTarget}
+          onClose={() => setRotateTarget(null)}
+          onRotated={() => {
+            // A rotated credential has a new secret value — any prior test
+            // result was about the old one and no longer applies.
+            setTestState((prev) => {
+              const next = { ...prev };
+              delete next[rotateTarget.id];
+              return next;
+            });
+            setRotateTarget(null);
             loadAll();
           }}
         />
@@ -333,6 +417,7 @@ function NewCredentialModal({
   const [provider, setProvider] = useState<'AWS' | 'GCP' | 'SSH' | 'GITHUB'>('AWS');
   const [name, setName] = useState('');
   const [rawData, setRawData] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -347,7 +432,7 @@ function NewCredentialModal({
       const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, provider, raw_data: rawData }),
+        body: JSON.stringify({ name, provider, raw_data: rawData, expires_at: expiresAt ? `${expiresAt}T00:00:00Z` : undefined }),
       });
       if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
       onCreated();
@@ -394,6 +479,10 @@ function NewCredentialModal({
           <label style={fieldLabelStyle}>Secret value</label>
           <textarea value={rawData} onChange={(e) => setRawData(e.target.value)} rows={3} placeholder="Pasted secret is encrypted at rest before storage" style={{ ...fieldStyle, height: 'auto', padding: 10, fontFamily: 'var(--font-mono-marketing), monospace', fontSize: 12, resize: 'vertical' }} />
         </div>
+        <div>
+          <label style={fieldLabelStyle}>Expires (optional)</label>
+          <input type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} style={{ ...fieldStyle, cursor: 'pointer' }} />
+        </div>
 
         {error && <p style={{ margin: 0, fontSize: 12, color: 'var(--danger)' }}>{error}</p>}
 
@@ -403,6 +492,80 @@ function NewCredentialModal({
           </button>
           <button type="button" onClick={handleSubmit} disabled={isSaving} style={{ height: 34, padding: '0 16px', fontSize: 13, fontWeight: 600, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: isSaving ? 'not-allowed' : 'pointer', opacity: isSaving ? 0.6 : 1 }}>
             {isSaving ? 'Saving…' : 'Create'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RotateCredentialModal({
+  token,
+  cred,
+  onClose,
+  onRotated,
+}: {
+  token: string | null;
+  cred: CredRow;
+  onClose: () => void;
+  onRotated: () => void;
+}) {
+  const [rawData, setRawData] = useState('');
+  const [expiresAt, setExpiresAt] = useState(cred.expires_at ? cred.expires_at.slice(0, 10) : '');
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async () => {
+    if (!token || !rawData) {
+      setError('Paste the new secret value.');
+      return;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/projects/${cred.project_id}/credentials/${cred.id}/rotate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ raw_data: rawData, expires_at: expiresAt ? `${expiresAt}T00:00:00Z` : undefined }),
+      });
+      if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+      onRotated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rotate credential.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const fieldLabelStyle: CSSProperties = { display: 'block', margin: '0 0 6px', fontSize: 11, color: 'var(--ink3)' };
+  const fieldStyle: CSSProperties = { width: '100%', height: 36, padding: '0 10px', border: '1px solid var(--line)', background: 'var(--elevated)', color: 'var(--ink)', fontSize: 13 };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.7)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
+      <div className="wp-blueprint" style={{ position: 'relative', width: 'min(420px, 92vw)', background: 'var(--panel)', padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }} onClick={(e) => e.stopPropagation()}>
+        <BlueprintCorners />
+        <div>
+          <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 18, color: 'var(--ink)' }}>Rotate &quot;{cred.name}&quot;</p>
+          <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--ink2)' }}>Re-encrypts this credential in place with a new value — its id and anything referencing it stay the same.</p>
+        </div>
+
+        <div>
+          <label style={fieldLabelStyle}>New secret value</label>
+          <textarea value={rawData} onChange={(e) => setRawData(e.target.value)} rows={3} placeholder="Pasted secret is encrypted at rest before storage" style={{ ...fieldStyle, height: 'auto', padding: 10, fontFamily: 'var(--font-mono-marketing), monospace', fontSize: 12, resize: 'vertical' }} />
+        </div>
+        <div>
+          <label style={fieldLabelStyle}>Expires (optional)</label>
+          <input type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} style={{ ...fieldStyle, cursor: 'pointer' }} />
+        </div>
+
+        {error && <p style={{ margin: 0, fontSize: 12, color: 'var(--danger)' }}>{error}</p>}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 4 }}>
+          <button type="button" onClick={onClose} style={{ height: 34, padding: '0 14px', fontSize: 13, border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink)', cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button type="button" onClick={handleSubmit} disabled={isSaving} style={{ height: 34, padding: '0 16px', fontSize: 13, fontWeight: 600, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: isSaving ? 'not-allowed' : 'pointer', opacity: isSaving ? 0.6 : 1 }}>
+            {isSaving ? 'Rotating…' : 'Rotate'}
           </button>
         </div>
       </div>

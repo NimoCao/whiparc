@@ -95,6 +95,10 @@ export interface LibraryPanelV2Props {
   onAddNode: (node: LibraryNode) => void;
   isReadOnly?: boolean;
   onCreateCustomNode?: () => void;
+  // Only true when this project's team can't create custom nodes *and* plan
+  // limits are live on this deployment — the lock is a real gate now, not a
+  // permanent decoration (F3).
+  customNodesLocked?: boolean;
 }
 
 export function LibraryPanelV2({
@@ -106,6 +110,7 @@ export function LibraryPanelV2({
   onAddNode,
   isReadOnly = false,
   onCreateCustomNode,
+  customNodesLocked = false,
 }: LibraryPanelV2Props) {
   const customLibraryNodes = useCanvasStore((state) => state.customLibraryNodes);
   const mappedCustomNodes: LibraryNode[] = (customLibraryNodes || []).map((cn) => {
@@ -149,6 +154,7 @@ export function LibraryPanelV2({
           >
             <Icon icon="lucide:plus" width={13} />
             Create custom node
+            {customNodesLocked && (
             <span
               style={{
                 marginLeft: 'auto',
@@ -166,6 +172,7 @@ export function LibraryPanelV2({
               <Icon icon="lucide:lock" width={9} />
               PRO
             </span>
+            )}
           </button>
         )}
 
