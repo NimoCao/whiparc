@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Icon } from '@iconify/react';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
 interface CredentialItem {
 	id: string;
 	project_id: string;
@@ -43,7 +45,7 @@ export default function CredentialManagerModal({ isOpen, onClose, projectId, tok
   const fetchCredentials = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`http://localhost:8080/api/projects/${projectId}/credentials`, {
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -112,7 +114,7 @@ export default function CredentialManagerModal({ isOpen, onClose, projectId, tok
 
     setIsSaving(true);
     try {
-      const res = await fetch(`http://localhost:8080/api/projects/${projectId}/credentials`, {
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -148,7 +150,7 @@ export default function CredentialManagerModal({ isOpen, onClose, projectId, tok
     if (!confirm('Are you sure you want to revoke and delete this credential?')) return;
 
     try {
-      const res = await fetch(`http://localhost:8080/api/projects/${projectId}/credentials/${credId}`, {
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials/${credId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -448,7 +450,7 @@ export function CredentialManagerTab({ projectId, token, onCredentialsChange }: 
   const fetchCredentials = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`http://localhost:8080/api/projects/${projectId}/credentials`, {
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -517,7 +519,7 @@ export function CredentialManagerTab({ projectId, token, onCredentialsChange }: 
 
     setIsSaving(true);
     try {
-      const res = await fetch(`http://localhost:8080/api/projects/${projectId}/credentials`, {
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -553,7 +555,7 @@ export function CredentialManagerTab({ projectId, token, onCredentialsChange }: 
     if (!confirm('Are you sure you want to revoke and delete this credential?')) return;
 
     try {
-      const res = await fetch(`http://localhost:8080/api/projects/${projectId}/credentials/${credId}`, {
+      const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials/${credId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`

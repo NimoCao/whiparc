@@ -67,3 +67,5 @@ next-env.d.ts
 # security-implementation notes not meant to ship in a public repo
 /obsidian_memory/
 
+# mcp for assistant
+/.mcp*
