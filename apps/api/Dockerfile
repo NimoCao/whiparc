@@ -20,7 +20,7 @@ ARG BASE_IMAGE_TAG=dev
 # regardless of layer invalidation, so editing one .go file no longer forces
 # recompiling every dependency from scratch on the next `docker compose up
 # --build`.
-FROM golang:1.23 AS gobase
+FROM golang:1.25 AS gobase
 WORKDIR /src
 
 # Both apps/api and apps/cli are independent Go modules that may require a
