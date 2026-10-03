@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -642,10 +641,8 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 // splitting it would mean migrating all of those together for a UX
 // convenience that free text already covers.
 //
-// Avatar is a pasted image URL, not a file upload — this app has no
-// object-storage integration for user content today (R2 is only used for
-// CLI binary distribution), and standing one up is a materially bigger task
-// than this endpoint. Revisit if real upload becomes worth it later.
+// Avatars are uploaded through POST /api/auth/avatar; this endpoint can
+// only clear one (avatar_url: "").
 func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	user, ok := GetUserFromContext(r)
 	if !ok {
@@ -675,16 +672,12 @@ func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		payload.Name = &trimmed
 	}
 
-	if payload.AvatarURL != nil {
-		trimmed := strings.TrimSpace(*payload.AvatarURL)
-		if trimmed != "" {
-			parsed, err := url.ParseRequestURI(trimmed)
-			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-				http.Error(w, "Avatar URL must be a valid http:// or https:// link", http.StatusBadRequest)
-				return
-			}
-		}
-		payload.AvatarURL = &trimmed
+	// Avatars are uploaded (POST /api/auth/avatar), never referenced by URL:
+	// the only value accepted here is an explicit empty string, which clears
+	// the current avatar. See avatar.go for why external URLs were removed.
+	if payload.AvatarURL != nil && strings.TrimSpace(*payload.AvatarURL) != "" {
+		http.Error(w, "Avatars must be uploaded as a .jpg or .png image; URLs are not accepted", http.StatusBadRequest)
+		return
 	}
 
 	if payload.Name != nil {
@@ -694,7 +687,7 @@ func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if payload.AvatarURL != nil {
-		if _, err := db.Exec("UPDATE users SET avatar_url = ? WHERE id = ?", nullIfEmpty(*payload.AvatarURL), user.ID); err != nil {
+		if err := clearUserAvatar(user.ID); err != nil {
 			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -708,6 +701,9 @@ func handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Push the new name/avatar to collaborators already in a workspace with
+	// this user; their presence entry was captured when they connected.
+	broadcastProfileUpdate(user.ID, name, avatarURL.String)
 
 	// name rides in the JWT (TokenClaims.Name) — re-issue so a name change
 	// is reflected immediately client-side without waiting on a separate
