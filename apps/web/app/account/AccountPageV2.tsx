@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Icon } from '@iconify/react';
@@ -11,21 +11,12 @@ import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
 import { BrandLogo } from '../components/brand/BrandLogo';
 import { buildOAuthLoginUrl } from '../lib/oauthRedirect';
+import { AVATAR_ACCEPT } from '../lib/avatar';
+import AvatarFace from '../components/AvatarFace';
+import AvatarCropper from '../components/AvatarCropper';
 import '../components/ui/blueprint.css';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-
-function sanitizeAvatarUrl(raw: string): string {
-  const value = raw.trim();
-  if (!value) return '';
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.toString();
-  } catch {
-    // Invalid URL; fall through to empty string.
-  }
-  return '';
-}
 
 const cardStyle: CSSProperties = { position: 'relative', background: 'var(--panel)', padding: '20px 22px' };
 const h2Style: CSSProperties = { margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, color: 'var(--ink)' };
@@ -64,9 +55,17 @@ function AccountContent() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const [profileName, setProfileName] = useState('');
-  const [profileAvatarUrl, setProfileAvatarUrl] = useState('');
-  const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [removingAvatar, setRemovingAvatar] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [showDelete, setShowDelete] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteBlockers, setDeleteBlockers] = useState<{ team_id: string; team_name: string; reason: string }[]>([]);
 
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [newEmail, setNewEmail] = useState('');
@@ -85,10 +84,8 @@ function AccountContent() {
     if (!user) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing the edit draft to a real user-record change (load, refresh, save), not a timer
     setProfileName(user.name);
-    setProfileAvatarUrl(user.avatar_url);
-    setAvatarLoadFailed(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.name, user?.avatar_url]);
+  }, [user?.name]);
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,13 +96,53 @@ function AccountContent() {
     }
     setSavingProfile(true);
     setActionError(null);
-    const result = await useAuthStore.getState().updateProfile({ name: trimmedName, avatar_url: profileAvatarUrl.trim() });
+    const result = await useAuthStore.getState().updateProfile({ name: trimmedName });
     setSavingProfile(false);
     if (result.success) {
       setNotice({ kind: 'success', text: 'Profile updated.' });
     } else {
       setActionError(result.error || 'Failed to update profile.');
     }
+  };
+
+  const handleAvatarPicked = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file after a cancel
+    if (!file) return;
+    setActionError(null);
+    setCropFile(file);
+  };
+
+  const handleAvatarConfirm = async (cropped: Blob): Promise<string | null> => {
+    const result = await useAuthStore.getState().uploadAvatar(cropped);
+    if (!result.success) return result.error || 'Failed to upload avatar.';
+    setCropFile(null);
+    setNotice({ kind: 'success', text: 'Avatar updated.' });
+    return null;
+  };
+
+  const handleRemoveAvatar = async () => {
+    setRemovingAvatar(true);
+    setActionError(null);
+    const result = await useAuthStore.getState().removeAvatar();
+    setRemovingAvatar(false);
+    if (result.success) setNotice({ kind: 'success', text: 'Avatar removed.' });
+    else setActionError(result.error || 'Failed to remove avatar.');
+  };
+
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDeleting(true);
+    setDeleteError(null);
+    setDeleteBlockers([]);
+    const result = await useAuthStore.getState().deleteAccount(deletePassword, deleteConfirmEmail);
+    setDeleting(false);
+    if (result.success) {
+      router.replace('/?account_deleted=1');
+      return;
+    }
+    setDeleteError(result.error || 'Failed to delete account.');
+    setDeleteBlockers(result.blockers ?? []);
   };
 
   const handleRequestEmailChange = async (e: React.FormEvent) => {
@@ -390,17 +427,7 @@ function AccountContent() {
                 overflow: 'hidden',
               }}
             >
-              {profileAvatarUrl && !avatarLoadFailed ? (
-                // eslint-disable-next-line @next/next/no-img-element -- an arbitrary externally-pasted URL, not an optimizable local/remote asset Next's Image loader is configured for
-                <img
-                  src={sanitizeAvatarUrl(profileAvatarUrl)}
-                  alt=""
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  onError={() => setAvatarLoadFailed(true)}
-                />
-              ) : (
-                (profileName || user.name).slice(0, 2)
-              )}
+              <AvatarFace url={user.avatar_url} name={profileName || user.name} />
             </div>
 
             <div style={{ flex: 1, display: 'grid', gap: 12 }}>
@@ -415,19 +442,30 @@ function AccountContent() {
                   style={{ height: 36, padding: '0 10px', border: '1px solid var(--line)', background: 'var(--elevated)', color: 'var(--ink)', fontSize: 13.5, fontFamily: 'var(--font-body-marketing), sans-serif', outline: 'none' }}
                 />
               </label>
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink2)' }}>Avatar URL</span>
-                <input
-                  type="url"
-                  value={profileAvatarUrl}
-                  onChange={(e) => {
-                    setProfileAvatarUrl(sanitizeAvatarUrl(e.target.value));
-                    setAvatarLoadFailed(false);
-                  }}
-                  placeholder="https://example.com/photo.jpg"
-                  style={{ height: 36, padding: '0 10px', border: '1px solid var(--line)', background: 'var(--elevated)', color: 'var(--ink)', fontSize: 13.5, fontFamily: 'var(--font-body-marketing), sans-serif', outline: 'none' }}
-                />
-              </label>
+              <div style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontFamily: 'var(--font-mono-marketing)', fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink2)' }}>Avatar</span>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input ref={fileInputRef} type="file" accept={AVATAR_ACCEPT} onChange={handleAvatarPicked} style={{ display: 'none' }} data-testid="avatar-file-input" />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{ height: 30, padding: '0 12px', fontSize: 12.5, border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink)', cursor: 'pointer' }}
+                  >
+                    {user.avatar_url ? 'Change photo' : 'Upload photo'}
+                  </button>
+                  {user.avatar_url && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveAvatar}
+                      disabled={removingAvatar}
+                      style={{ height: 30, padding: '0 12px', fontSize: 12.5, border: '1px solid var(--line)', background: 'transparent', color: 'var(--danger)', cursor: 'pointer' }}
+                    >
+                      {removingAvatar ? 'Removing…' : 'Remove'}
+                    </button>
+                  )}
+                  <span style={{ fontSize: 11.5, color: 'var(--ink3)' }}>JPG or PNG, cropped square to 256×256.</span>
+                </div>
+              </div>
 
               <button
                 type="submit"
@@ -525,7 +563,96 @@ function AccountContent() {
             Logout
           </button>
         </div>
+
+        <div className="wp-blueprint" style={{ ...cardStyle, border: '1px solid var(--danger)' }}>
+          <BlueprintCorners />
+          <h2 style={{ ...h2Style, color: 'var(--danger)' }}>Delete account</h2>
+          <p style={bodyStyle}>
+            Permanently deletes your account, your personal workspace and every project, credential and agent in it, and your published templates.
+            Work you created inside other people&apos;s teams stays with them. This cannot be undone.
+          </p>
+          {!showDelete ? (
+            <button
+              type="button"
+              onClick={() => setShowDelete(true)}
+              style={{ marginTop: 14, height: 36, padding: '0 16px', fontSize: 13, fontWeight: 500, background: 'transparent', color: 'var(--danger)', border: '1px solid var(--danger)', cursor: 'pointer' }}
+            >
+              Delete my account…
+            </button>
+          ) : !hasPassword ? (
+            <p style={{ ...bodyStyle, color: 'var(--danger)' }}>Set a password first (Password card above) — it&apos;s required to confirm deletion.</p>
+          ) : (
+            <form onSubmit={handleDeleteAccount} style={{ marginTop: 14, display: 'grid', gap: 12, maxWidth: 380 }}>
+              <label style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontSize: 12, color: 'var(--ink2)' }}>
+                  Type your email <strong style={{ color: 'var(--ink)' }}>{user.email}</strong> to confirm
+                </span>
+                <input
+                  type="email"
+                  required
+                  autoComplete="off"
+                  value={deleteConfirmEmail}
+                  onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+                  data-testid="delete-confirm-email"
+                  style={{ height: 36, padding: '0 10px', border: '1px solid var(--line)', background: 'var(--elevated)', color: 'var(--ink)', fontSize: 13.5, outline: 'none' }}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontSize: 12, color: 'var(--ink2)' }}>Current password</span>
+                <input
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  data-testid="delete-password"
+                  style={{ height: 36, padding: '0 10px', border: '1px solid var(--line)', background: 'var(--elevated)', color: 'var(--ink)', fontSize: 13.5, outline: 'none' }}
+                />
+              </label>
+              {deleteError && (
+                <div role="alert" style={{ fontSize: 12.5, color: 'var(--danger)' }}>
+                  <p style={{ margin: 0 }}>{deleteError}</p>
+                  {deleteBlockers.length > 0 && (
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                      {deleteBlockers.map((b, i) => (
+                        <li key={`${b.team_id}-${i}`}>
+                          <strong>{b.team_name}</strong>: {b.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  type="submit"
+                  disabled={deleting || !deletePassword || !deleteConfirmEmail}
+                  data-testid="delete-account-submit"
+                  style={{ height: 36, padding: '0 16px', fontSize: 13, fontWeight: 600, background: 'var(--danger)', color: '#fff', border: 0, cursor: deleting ? 'default' : 'pointer', opacity: deleting || !deletePassword || !deleteConfirmEmail ? 0.6 : 1 }}
+                >
+                  {deleting ? 'Deleting…' : 'Permanently delete account'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDelete(false);
+                    setDeletePassword('');
+                    setDeleteConfirmEmail('');
+                    setDeleteError(null);
+                    setDeleteBlockers([]);
+                  }}
+                  disabled={deleting}
+                  style={{ height: 36, padding: '0 16px', fontSize: 13, background: 'transparent', color: 'var(--ink)', border: '1px solid var(--line)', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       </div>
+
+      {cropFile && <AvatarCropper file={cropFile} onCancel={() => setCropFile(null)} onConfirm={handleAvatarConfirm} />}
     </div>
   );
 }

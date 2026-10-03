@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strings"
@@ -60,6 +61,19 @@ func AuthMiddleware(next http.Handler) http.Handler {
 		if err != nil {
 			http.Error(w, "Unauthorized: "+err.Error(), http.StatusUnauthorized)
 			return
+		}
+
+		// JWTs are stateless, so a token minted before an account was deleted
+		// would otherwise keep working until it expires. One indexed
+		// primary-key lookup closes that window. Only a definitive "no such
+		// user" rejects the request; any other DB error falls through so a
+		// transient blip doesn't log everyone out (handlers hit the DB anyway).
+		if db != nil {
+			var one int
+			if err := db.QueryRow("SELECT 1 FROM users WHERE id = ?", claims.ID).Scan(&one); err == sql.ErrNoRows {
+				http.Error(w, "Unauthorized: this account no longer exists", http.StatusUnauthorized)
+				return
+			}
 		}
 
 		ctx := context.WithValue(r.Context(), userContextKey, claims)

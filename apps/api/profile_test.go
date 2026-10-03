@@ -23,7 +23,7 @@ func TestUpdateProfileNameAndAvatar(t *testing.T) {
 		t.Fatalf("insert user: %v", err)
 	}
 
-	body, _ := json.Marshal(map[string]string{"name": "  New Name  ", "avatar_url": "https://example.com/avatar.png"})
+	body, _ := json.Marshal(map[string]string{"name": "  New Name  "})
 	req := httptest.NewRequest(http.MethodPatch, "/api/auth/profile", bytes.NewReader(body))
 	req = req.WithContext(context.WithValue(req.Context(), userContextKey, &TokenClaims{ID: "u_1"}))
 	w := httptest.NewRecorder()
@@ -49,17 +49,16 @@ func TestUpdateProfileNameAndAvatar(t *testing.T) {
 	if resp.User.Name != "New Name" {
 		t.Fatalf("expected trimmed name 'New Name', got %q", resp.User.Name)
 	}
-	if resp.User.AvatarURL != "https://example.com/avatar.png" {
-		t.Fatalf("expected avatar_url to be set, got %q", resp.User.AvatarURL)
+	if resp.User.AvatarURL != "" {
+		t.Fatalf("expected no avatar, got %q", resp.User.AvatarURL)
 	}
 
 	var name string
-	var avatarURL sql.NullString
-	if err := testDB.QueryRow("SELECT name, avatar_url FROM users WHERE id = 'u_1'").Scan(&name, &avatarURL); err != nil {
+	if err := testDB.QueryRow("SELECT name FROM users WHERE id = 'u_1'").Scan(&name); err != nil {
 		t.Fatalf("query updated user: %v", err)
 	}
-	if name != "New Name" || avatarURL.String != "https://example.com/avatar.png" {
-		t.Fatalf("expected persisted name/avatar_url to match, got name=%q avatar_url=%q", name, avatarURL.String)
+	if name != "New Name" {
+		t.Fatalf("expected persisted name to match, got name=%q", name)
 	}
 }
 
@@ -70,12 +69,15 @@ func TestUpdateProfilePartialUpdateLeavesOtherFieldAlone(t *testing.T) {
 	db = testDB
 	defer func() { db = oldDB }()
 
-	if _, err := testDB.Exec("INSERT INTO users (id, email, password_hash, name, avatar_url, email_verified) VALUES ('u_1', 'profile@test.com', 'hash', 'Original Name', 'https://example.com/original.png', TRUE)"); err != nil {
+	if _, err := testDB.Exec("INSERT INTO users (id, email, password_hash, name, avatar_url, email_verified) VALUES ('u_1', 'profile@test.com', 'hash', 'Original Name', '/api/avatars/00000000000000000000000000000001', TRUE)"); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
+	if _, err := testDB.Exec("INSERT INTO user_avatars (user_id, key, mime, data) VALUES ('u_1', '00000000000000000000000000000001', 'image/png', x'00')"); err != nil {
+		t.Fatalf("insert avatar: %v", err)
+	}
 
-	// Only sending avatar_url — name must be left untouched.
-	body, _ := json.Marshal(map[string]string{"avatar_url": "https://example.com/new.png"})
+	// Only sending name — the uploaded avatar must be left untouched.
+	body, _ := json.Marshal(map[string]string{"name": "Renamed"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/auth/profile", bytes.NewReader(body))
 	req = req.WithContext(context.WithValue(req.Context(), userContextKey, &TokenClaims{ID: "u_1"}))
 	w := httptest.NewRecorder()
@@ -90,11 +92,11 @@ func TestUpdateProfilePartialUpdateLeavesOtherFieldAlone(t *testing.T) {
 	if err := testDB.QueryRow("SELECT name, avatar_url FROM users WHERE id = 'u_1'").Scan(&name, &avatarURL); err != nil {
 		t.Fatalf("query updated user: %v", err)
 	}
-	if name != "Original Name" {
-		t.Fatalf("expected name to be untouched, got %q", name)
+	if name != "Renamed" {
+		t.Fatalf("expected name to be updated, got %q", name)
 	}
-	if avatarURL.String != "https://example.com/new.png" {
-		t.Fatalf("expected avatar_url to be updated, got %q", avatarURL.String)
+	if avatarURL.String != "/api/avatars/00000000000000000000000000000001" {
+		t.Fatalf("expected avatar_url to be untouched, got %q", avatarURL.String)
 	}
 
 	// An explicit empty string clears the avatar back to NULL.
@@ -113,6 +115,11 @@ func TestUpdateProfilePartialUpdateLeavesOtherFieldAlone(t *testing.T) {
 	}
 	if avatarAfterClear.Valid {
 		t.Fatalf("expected avatar_url to be cleared to NULL, got %q", avatarAfterClear.String)
+	}
+	var blobs int
+	_ = testDB.QueryRow("SELECT COUNT(*) FROM user_avatars WHERE user_id = 'u_1'").Scan(&blobs)
+	if blobs != 0 {
+		t.Fatalf("expected the stored avatar bytes to be deleted too, found %d", blobs)
 	}
 }
 
@@ -134,6 +141,7 @@ func TestUpdateProfileRejectsInvalidInput(t *testing.T) {
 		{"empty name", map[string]string{"name": "   "}},
 		{"javascript scheme avatar", map[string]string{"avatar_url": "javascript:alert(1)"}},
 		{"not a url", map[string]string{"avatar_url": "not-a-url"}},
+		{"external https avatar url", map[string]string{"avatar_url": "https://example.com/avatar.png"}},
 	}
 
 	for _, tc := range cases {

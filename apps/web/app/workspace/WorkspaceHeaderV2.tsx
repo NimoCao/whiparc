@@ -4,6 +4,7 @@ import React, { useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { Icon } from '@iconify/react';
 import ProfileMenu from '../components/ProfileMenu';
+import AvatarFace from '../components/AvatarFace';
 import Tooltip from '../components/Tooltip';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import type { Project } from '../lib/types';
@@ -15,6 +16,7 @@ interface Collaborator {
   id: string;
   name: string;
   color: string;
+  avatar_url?: string;
 }
 
 export interface WorkspaceHeaderV2Props {
@@ -184,9 +186,10 @@ export function WorkspaceHeaderV2({
                 border: '2px solid var(--panel)',
                 marginLeft: i > 0 ? -7 : 0,
                 borderRadius: 2,
+                overflow: 'hidden',
               }}
             >
-              {c.name.slice(0, 2).toUpperCase()}
+              <AvatarFace url={c.avatar_url} name={c.name} />
             </span>
           ))
         )}

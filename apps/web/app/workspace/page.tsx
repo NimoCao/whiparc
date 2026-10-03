@@ -3024,7 +3024,7 @@ function WorkspaceContent() {
   const isIncomingSyncRef = useRef<boolean>(false);
   const lastStateRef = useRef<{ nodes: Node[], edges: Edge[] }>({ nodes: [], edges: [] });
 
-  const [collaborators, setCollaborators] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [collaborators, setCollaborators] = useState<{ id: string; name: string; color: string; avatar_url?: string }[]>([]);
   const [isSyncConnected, setIsSyncConnected] = useState(false);
   const [peerCursors, setPeerCursors] = useState<Record<string, { x: number; y: number; name: string; color: string }>>({});
   const [, setPeerEdits] = useState<Record<string, string>>({}); // maps nodeId -> userName editing it
@@ -3113,6 +3113,14 @@ function WorkspaceContent() {
             if (activePeers.length > 0) {
               ws.send(JSON.stringify({ type: 'request_sync' }));
             }
+          }
+        } else if (type === 'profile') {
+          // A collaborator changed their name or avatar while we're in the
+          // same workspace: patch their presence entry in place.
+          const { id, name, avatar_url } = payload ?? {};
+          if (id) {
+            setCollaborators(prev => prev.map(c => (c.id === id ? { ...c, name: name ?? c.name, avatar_url } : c)));
+            setPeerCursors(prev => (prev[id] ? { ...prev, [id]: { ...prev[id], name: name ?? prev[id].name } } : prev));
           }
         } else if (type === 'request_sync') {
           if (ws.readyState === WebSocket.OPEN) {
