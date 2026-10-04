@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Icon } from '@iconify/react';
+import { useAbortableEffect, isAbortError } from '../lib/useAbortableEffect';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -42,13 +43,14 @@ export default function CredentialManagerModal({ isOpen, onClose, projectId, tok
 
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const fetchCredentials = useCallback(async () => {
+  const fetchCredentials = useCallback(async (signal: AbortSignal = new AbortController().signal) => {
     setIsLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials`, {
         headers: {
           'Authorization': `Bearer ${token}`
-        }
+        },
+        signal,
       });
       if (res.ok) {
         const data = await res.json();
@@ -58,17 +60,16 @@ export default function CredentialManagerModal({ isOpen, onClose, projectId, tok
         }
       }
     } catch (err) {
-      console.error('Failed to load credentials', err);
+      if (!isAbortError(err)) console.error('Failed to load credentials', err);
     } finally {
-      setIsLoading(false);
+      if (!signal.aborted) setIsLoading(false);
     }
   }, [projectId, token, onCredentialsChange]);
 
-  useEffect(() => {
+  useAbortableEffect((signal) => {
     if (isOpen && token) {
       // Fetching on open is the intended synchronization with the credentials API.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      fetchCredentials();
+      fetchCredentials(signal);
     }
   }, [isOpen, token, fetchCredentials]);
 
@@ -447,13 +448,14 @@ export function CredentialManagerTab({ projectId, token, onCredentialsChange }: 
   const [sshUser, setSshUser] = useState<string>('ubuntu');
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const fetchCredentials = useCallback(async () => {
+  const fetchCredentials = useCallback(async (signal: AbortSignal = new AbortController().signal) => {
     setIsLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials`, {
         headers: {
           'Authorization': `Bearer ${token}`
-        }
+        },
+        signal,
       });
       if (res.ok) {
         const data = await res.json();
@@ -463,17 +465,16 @@ export function CredentialManagerTab({ projectId, token, onCredentialsChange }: 
         }
       }
     } catch (err) {
-      console.error('Failed to load credentials', err);
+      if (!isAbortError(err)) console.error('Failed to load credentials', err);
     } finally {
-      setIsLoading(false);
+      if (!signal.aborted) setIsLoading(false);
     }
   }, [projectId, token, onCredentialsChange]);
 
-  useEffect(() => {
+  useAbortableEffect((signal) => {
     if (projectId && token) {
       // Fetching on mount/prop change is the intended synchronization with the credentials API.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      fetchCredentials();
+      fetchCredentials(signal);
     }
   }, [projectId, token, fetchCredentials]);
 
