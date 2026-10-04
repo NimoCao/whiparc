@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import React, { useState, useCallback } from 'react';
 import { Icon } from '@iconify/react';
 import { useAbortableEffect, isAbortError } from '../lib/useAbortableEffect';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 interface CredentialItem {
 	id: string;
@@ -43,14 +44,11 @@ export default function CredentialManagerModal({ isOpen, onClose, projectId, tok
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchCredentials = useCallback(async (signal: AbortSignal = new AbortController().signal) => {
-  const fetchCredentials = useCallback(async (signal: AbortSignal = new AbortController().signal) => {
     setIsLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials`, {
         headers: {
           'Authorization': `Bearer ${token}`
-        },
-        signal,
         },
         signal,
       });
@@ -63,18 +61,14 @@ export default function CredentialManagerModal({ isOpen, onClose, projectId, tok
       }
     } catch (err) {
       if (!isAbortError(err)) console.error('Failed to load credentials', err);
-      if (!isAbortError(err)) console.error('Failed to load credentials', err);
     } finally {
-      if (!signal.aborted) setIsLoading(false);
       if (!signal.aborted) setIsLoading(false);
     }
   }, [projectId, token, onCredentialsChange]);
 
   useAbortableEffect((signal) => {
-  useAbortableEffect((signal) => {
     if (isOpen && token) {
       // Fetching on open is the intended synchronization with the credentials API.
-      fetchCredentials(signal);
       fetchCredentials(signal);
     }
   }, [isOpen, token, fetchCredentials]);
@@ -455,14 +449,11 @@ export function CredentialManagerTab({ projectId, token, onCredentialsChange }: 
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchCredentials = useCallback(async (signal: AbortSignal = new AbortController().signal) => {
-  const fetchCredentials = useCallback(async (signal: AbortSignal = new AbortController().signal) => {
     setIsLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/projects/${projectId}/credentials`, {
         headers: {
           'Authorization': `Bearer ${token}`
-        },
-        signal,
         },
         signal,
       });
@@ -475,18 +466,14 @@ export function CredentialManagerTab({ projectId, token, onCredentialsChange }: 
       }
     } catch (err) {
       if (!isAbortError(err)) console.error('Failed to load credentials', err);
-      if (!isAbortError(err)) console.error('Failed to load credentials', err);
     } finally {
-      if (!signal.aborted) setIsLoading(false);
       if (!signal.aborted) setIsLoading(false);
     }
   }, [projectId, token, onCredentialsChange]);
 
   useAbortableEffect((signal) => {
-  useAbortableEffect((signal) => {
     if (projectId && token) {
       // Fetching on mount/prop change is the intended synchronization with the credentials API.
-      fetchCredentials(signal);
       fetchCredentials(signal);
     }
   }, [projectId, token, fetchCredentials]);
