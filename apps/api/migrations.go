@@ -356,6 +356,40 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     13,
+		description: "add_user_avatars_table",
+		up: func(tx sqlExecer) error {
+			// Uploaded avatar bytes live in their own table so ordinary user
+			// queries never drag a BLOB along. `key` is the random public
+			// identifier served at /api/avatars/{key} and is regenerated on
+			// every upload. FK cascade means deleting a user (account
+			// deletion) removes their avatar with no extra code path.
+			ddl := `CREATE TABLE user_avatars (
+				user_id TEXT PRIMARY KEY,
+				key TEXT UNIQUE NOT NULL,
+				mime TEXT NOT NULL,
+				data BLOB NOT NULL,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+			)`
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to create user_avatars: %w", err)
+			}
+			// Before this migration avatar_url could only ever be a
+			// user-pasted external URL. Those are the exact thing the upload
+			// flow replaces (every viewer's browser fetched an arbitrary
+			// third-party host), so they are cleared; users fall back to
+			// initials until they upload an image.
+			if _, err := tx.Exec("UPDATE users SET avatar_url = NULL WHERE avatar_url IS NOT NULL"); err != nil {
+				return fmt.Errorf("failed to clear legacy external avatar URLs: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

@@ -143,6 +143,8 @@ var (
 	resendLimiter      *RateLimiter
 	forgotLimiter      *RateLimiter
 	emailChangeLimiter *RateLimiter
+	avatarLimiter      *RateLimiter
+	deleteAcctLimiter  *RateLimiter
 )
 
 // waitForPostgres retries the initial ping instead of failing on first
@@ -289,6 +291,8 @@ func main() {
 	resendLimiter = NewRateLimiter(3, 15*time.Minute, 3)      // 3 resends per 15 min per user/IP
 	forgotLimiter = NewRateLimiter(5, 15*time.Minute, 5)      // 5 forgot-password requests per 15 min per IP
 	emailChangeLimiter = NewRateLimiter(5, 15*time.Minute, 5) // 5 email-change requests per 15 min per user
+	avatarLimiter = NewRateLimiter(10, 15*time.Minute, 10)    // 10 avatar uploads per 15 min per user
+	deleteAcctLimiter = NewRateLimiter(5, 15*time.Minute, 5)  // 5 account-deletion attempts per 15 min per user (password guessing guard)
 
 	// Set up routing
 	mux := http.NewServeMux()
@@ -313,6 +317,10 @@ func main() {
 	mux.Handle("POST /api/auth/resend-verification", AuthMiddleware(http.HandlerFunc(handleResendVerification)))
 	mux.Handle("GET /api/auth/me", AuthMiddleware(http.HandlerFunc(handleMe)))
 	mux.Handle("PATCH /api/auth/profile", AuthMiddleware(http.HandlerFunc(handleUpdateProfile)))
+	mux.Handle("POST /api/auth/avatar", AuthMiddleware(http.HandlerFunc(handleUploadAvatar)))
+	mux.Handle("DELETE /api/auth/avatar", AuthMiddleware(http.HandlerFunc(handleDeleteAvatar)))
+	mux.HandleFunc("GET /api/avatars/{key}", handleGetAvatar)
+	mux.Handle("DELETE /api/auth/account", AuthMiddleware(http.HandlerFunc(handleDeleteAccount)))
 	mux.Handle("PATCH /api/auth/onboarding", AuthMiddleware(http.HandlerFunc(handleDismissOnboarding)))
 	mux.HandleFunc("POST /api/auth/forgot", enableCORS(handleForgotPassword))
 	// Deliberately not GET /api/auth/reset/{token} — that collides with
@@ -1761,11 +1769,12 @@ type SyncMessage struct {
 }
 
 type SyncClient struct {
-	conn     *websocket.Conn
-	roomID   string
-	userID   string
-	userName string
-	color    string
+	conn      *websocket.Conn
+	roomID    string
+	userID    string
+	userName  string
+	avatarURL string // relative /api/avatars/{key} path, "" when unset; guarded by the room lock
+	color     string
 }
 
 type WorkspaceRoom struct {
@@ -1824,6 +1833,18 @@ func handleWorkspaceWebSocketSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// This handler is reached directly from the mux (see its registration in
+	// main()), not through AuthMiddleware/RequireProjectRole like every other
+	// project route — so unlike those, it has to check project access itself.
+	// Before this check, VerifyToken succeeding was the only gate: ANY
+	// authenticated user, with no relationship to the project at all, could
+	// open this socket, see who else was in the room, and inject 'change'
+	// messages that peers applied straight into their live canvas state.
+	if allowed, status, message := checkProjectAccess(claims.ID, projectId, "VIEWER"); !allowed {
+		http.Error(w, message, status)
+		return
+	}
+
 	// Upgrade the connection
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -1844,29 +1865,32 @@ func handleWorkspaceWebSocketSync(w http.ResponseWriter, r *http.Request) {
 	roomsMutex.Unlock()
 
 	clientColor := getRandomColor(claims.ID)
+	// Name and avatar come from the database, not the JWT: the token can be
+	// up to 24h stale, so after a profile edit a reconnecting client would
+	// otherwise advertise the old name (and the token has no avatar at all).
+	displayName := claims.Name
+	var liveName string
+	var liveAvatar sql.NullString
+	if err := db.QueryRow("SELECT name, avatar_url FROM users WHERE id = ?", claims.ID).Scan(&liveName, &liveAvatar); err == nil && liveName != "" {
+		displayName = liveName
+	}
 	client := &SyncClient{
-		conn:     conn,
-		roomID:   projectId,
-		userID:   claims.ID,
-		userName: claims.Name,
-		color:    clientColor,
+		conn:      conn,
+		roomID:    projectId,
+		userID:    claims.ID,
+		userName:  displayName,
+		avatarURL: liveAvatar.String,
+		color:     clientColor,
 	}
 
 	room.Lock()
 	room.clients[conn] = client
 
 	// Create active users user list to send back as an initialization
-	activeUsersList := make([]map[string]string, 0)
-	for _, c := range room.clients {
-		activeUsersList = append(activeUsersList, map[string]string{
-			"id":    c.userID,
-			"name":  c.userName,
-			"color": c.color,
-		})
-	}
+	activeUsersList := roomMembersLocked(room)
 	room.Unlock()
 
-	log.Printf("[SYNC] User %s joined workspace %s\n", claims.Name, projectId)
+	log.Printf("[SYNC] User %s joined workspace %s\n", displayName, projectId)
 
 	// Send initial list of active users to the new client
 	initPayload, _ := json.Marshal(activeUsersList)
@@ -1903,8 +1927,11 @@ func handleWorkspaceWebSocketSync(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Fill system metadata details
+		room.RLock()
+		senderName := client.userName
+		room.RUnlock()
 		msg.SenderID = client.userID
-		msg.SenderName = client.userName
+		msg.SenderName = senderName
 		msg.Color = client.color
 		msg.ProjectID = projectId
 
@@ -1917,17 +1944,10 @@ func handleWorkspaceWebSocketSync(w http.ResponseWriter, r *http.Request) {
 	delete(room.clients, conn)
 
 	// Re-compile active users user list post-exit
-	remainingUsers := make([]map[string]string, 0)
-	for _, c := range room.clients {
-		remainingUsers = append(remainingUsers, map[string]string{
-			"id":    c.userID,
-			"name":  c.userName,
-			"color": c.color,
-		})
-	}
+	remainingUsers := roomMembersLocked(room)
 	room.Unlock()
 
-	log.Printf("[SYNC] User %s left workspace %s\n", claims.Name, projectId)
+	log.Printf("[SYNC] User %s left workspace %s\n", displayName, projectId)
 
 	// Broadcast LEAVE to all other clients in the room
 	leavePayload, _ := json.Marshal(remainingUsers)
@@ -1939,6 +1959,52 @@ func handleWorkspaceWebSocketSync(w http.ResponseWriter, r *http.Request) {
 		Payload:    leavePayload,
 	}
 	broadcastToRoom(projectId, leaveMsg, nil)
+}
+
+// roomMembersLocked snapshots a room's presence list. Caller must hold the
+// room lock.
+func roomMembersLocked(room *WorkspaceRoom) []map[string]string {
+	members := make([]map[string]string, 0, len(room.clients))
+	for _, c := range room.clients {
+		members = append(members, map[string]string{
+			"id":         c.userID,
+			"name":       c.userName,
+			"color":      c.color,
+			"avatar_url": c.avatarURL,
+		})
+	}
+	return members
+}
+
+// broadcastProfileUpdate pushes a changed display name / avatar to every
+// workspace room the user is currently connected to, so collaborators see the
+// new look immediately instead of only after a reload. The sender's other
+// tabs receive it too (no connection is excluded).
+func broadcastProfileUpdate(userID, name, avatarURL string) {
+	payload, _ := json.Marshal(map[string]string{"id": userID, "name": name, "avatar_url": avatarURL})
+
+	roomsMutex.Lock()
+	snapshot := make(map[string]*WorkspaceRoom, len(rooms))
+	for id, room := range rooms {
+		snapshot[id] = room
+	}
+	roomsMutex.Unlock()
+
+	for roomID, room := range snapshot {
+		touched := false
+		room.Lock()
+		for _, c := range room.clients {
+			if c.userID == userID {
+				c.userName = name
+				c.avatarURL = avatarURL
+				touched = true
+			}
+		}
+		room.Unlock()
+		if touched {
+			broadcastToRoom(roomID, SyncMessage{Type: "profile", ProjectID: roomID, SenderID: userID, SenderName: name, Payload: payload}, nil)
+		}
+	}
 }
 
 func broadcastToRoom(roomID string, msg SyncMessage, senderConn *websocket.Conn) {

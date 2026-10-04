@@ -37,7 +37,11 @@ interface AuthState {
   setSessionFromToken: (token: string) => boolean;
   logout: () => void;
   clearError: () => void;
-  updateProfile: (payload: { name?: string; avatar_url?: string }) => Promise<{ success: boolean; error?: string }>;
+  // avatar_url can only be "" (remove the avatar) — images are uploaded via uploadAvatar.
+  updateProfile: (payload: { name?: string; avatar_url?: '' }) => Promise<{ success: boolean; error?: string }>;
+  uploadAvatar: (image: Blob) => Promise<{ success: boolean; error?: string }>;
+  removeAvatar: () => Promise<{ success: boolean; error?: string }>;
+  deleteAccount: (password: string, confirmEmail: string) => Promise<{ success: boolean; error?: string; blockers?: { team_id: string; team_name: string; reason: string }[] }>;
   requestEmailChange: (newEmail: string, currentPassword: string) => Promise<{ success: boolean; message?: string; error?: string }>;
   confirmEmailChange: (token: string) => Promise<{ success: boolean; email?: string; error?: string }>;
 }
@@ -309,6 +313,74 @@ export const useAuthStore = create<AuthState>()(
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : 'Failed to update profile';
           return { success: false, error: msg };
+        }
+      },
+
+      uploadAvatar: async (image) => {
+        const token = get().token;
+        if (!token) return { success: false, error: 'Please sign in first.' };
+        try {
+          const form = new FormData();
+          form.append('avatar', image, 'avatar.png');
+          const res = await fetch(`${API_URL}/api/auth/avatar`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: form,
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText.trim() || 'Failed to upload avatar');
+          }
+          const data = await res.json();
+          set({ token: data.token, user: data.user });
+          return { success: true };
+        } catch (err: unknown) {
+          return { success: false, error: networkErrorMessage(err, 'Failed to upload avatar') };
+        }
+      },
+
+      removeAvatar: async () => {
+        const token = get().token;
+        if (!token) return { success: false, error: 'Please sign in first.' };
+        try {
+          const res = await fetch(`${API_URL}/api/auth/avatar`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText.trim() || 'Failed to remove avatar');
+          }
+          const data = await res.json();
+          set({ token: data.token, user: data.user });
+          return { success: true };
+        } catch (err: unknown) {
+          return { success: false, error: networkErrorMessage(err, 'Failed to remove avatar') };
+        }
+      },
+
+      deleteAccount: async (password, confirmEmail) => {
+        const token = get().token;
+        if (!token) return { success: false, error: 'Please sign in first.' };
+        try {
+          const res = await fetch(`${API_URL}/api/auth/account`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ password, confirm_email: confirmEmail }),
+          });
+          if (res.status === 409) {
+            const data = await res.json();
+            return { success: false, error: data.error, blockers: data.blockers };
+          }
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText.trim() || 'Failed to delete account');
+          }
+          // Account is gone server-side; drop the (now rejected) session.
+          set({ token: null, user: null, error: null });
+          return { success: true };
+        } catch (err: unknown) {
+          return { success: false, error: networkErrorMessage(err, 'Failed to delete account') };
         }
       },
 
