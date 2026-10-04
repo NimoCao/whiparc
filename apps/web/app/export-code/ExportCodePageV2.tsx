@@ -178,15 +178,10 @@ export function ExportCodePageV2() {
   // Compile files dynamically from canvas Zustand store
   const bundleFiles = useMemo(() => generateBundleFiles(nodes, edges), [nodes, edges]);
 
-  // Auto-select first file whenever the file list changes
-  useEffect(() => {
-    if (bundleFiles.length > 0 && (!selectedFilePath || !bundleFiles.find((f) => f.path === selectedFilePath))) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSelectedFilePath(bundleFiles[0].path);
-    }
-  }, [bundleFiles, selectedFilePath]);
-
+  // Falls back to the first file whenever nothing is picked or the picked file
+  // left the bundle — derived, so there is no selection state to keep in sync.
   const activeFile = useMemo(() => bundleFiles.find((f) => f.path === selectedFilePath) ?? bundleFiles[0], [bundleFiles, selectedFilePath]);
+  const activeFilePath = activeFile?.path;
 
   const folders = useMemo(() => {
     const map: Record<string, FileItem[]> = {};
@@ -309,7 +304,7 @@ export function ExportCodePageV2() {
                 return (
                   <div key="root" style={{ display: 'grid', gap: 1, marginBottom: 12 }}>
                     {dirFiles.map((file) => {
-                      const isSelected = selectedFilePath === file.path;
+                      const isSelected = activeFilePath === file.path;
                       return (
                         <button
                           key={file.path}
@@ -339,7 +334,7 @@ export function ExportCodePageV2() {
                   </p>
                   <div style={{ display: 'grid', gap: 1 }}>
                     {dirFiles.map((file) => {
-                      const isSelected = selectedFilePath === file.path;
+                      const isSelected = activeFilePath === file.path;
                       return (
                         <button
                           key={file.path}

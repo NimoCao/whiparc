@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../store/useAuthStore';
@@ -30,47 +30,8 @@ const TECH_OPTIONS = [
   { value: 'Kubernetes', label: 'Kubernetes Resource' },
 ] as const;
 
-const KICKER_STYLE = {
-  fontFamily: 'var(--font-mono-marketing, ui-monospace, monospace)',
-  fontSize: 10,
-  letterSpacing: '.1em',
-  textTransform: 'uppercase',
-} as const;
-
-export default function CustomNodeModal({ isOpen, onClose, projectId }: CustomNodeModalProps) {
-  const { user, token } = useAuthStore();
-  const { addCustomLibraryNode, addNode } = useCanvasStore();
-  const router = useRouter();
-
-  const [tech, setTech] = useState<'Terraform' | 'Ansible' | 'Kubernetes'>('Terraform');
-  const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('');
-  const [description, setDescription] = useState('');
-  const [rawCode, setRawCode] = useState('');
-  
-  const [isValidating, setIsValidating] = useState(false);
-  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
-  const [extractedParams, setExtractedParams] = useState<string[]>([]);
-  const [isValid, setIsValid] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isTechDropdownOpen, setIsTechDropdownOpen] = useState(false);
-
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-  // Custom-node creation is gated by the *project's* team plan, not the
-  // signed-in user's best plan (a user can be Pro on one team and Free on the
-  // team that owns this project) — so ask the server (F3). Until it answers,
-  // fall back to the user's best plan as a first guess so the editor doesn't
-  // flash for someone who's about to see the paywall, or vice versa.
-  const entitlements = useProjectEntitlements(isOpen ? projectId : null);
-  const isPremium = entitlements?.custom_nodes_allowed ?? isPaidPlan(user?.plan);
-
-  // Sync default code template when tech changes.
-  // Resetting the editor's template + validation state to match the
-  // selected tech is the intended effect here.
-  useEffect(() => {
-    if (tech === 'Terraform') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setRawCode(`resource "aws_redis_cluster" "redis" {
+const TECH_TEMPLATES: Record<(typeof TECH_OPTIONS)[number]['value'], string> = {
+  Terraform: `resource "aws_redis_cluster" "redis" {
   cluster_id           = "infra-cache"
   node_type            = "cache.t3.micro"
   num_cache_nodes      = var.node_count
@@ -81,17 +42,15 @@ export default function CustomNodeModal({ isOpen, onClose, projectId }: CustomNo
 variable "node_count" {
   type    = number
   default = 1
-}`);
-    } else if (tech === 'Ansible') {
-      setRawCode(`- name: Ensure nginx container is running
+}`,
+  Ansible: `- name: Ensure nginx container is running
   community.docker.docker_container:
     name: nginx-server
     image: "{{ nginx_version }}"
     state: started
     ports:
-      - "80:80"`);
-    } else if (tech === 'Kubernetes') {
-      setRawCode(`apiVersion: apps/v1
+      - "80:80"`,
+  Kubernetes: `apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cache-deployment
@@ -111,12 +70,52 @@ spec:
       - name: redis
         image: redis:7.0-alpine
         ports:
-        - containerPort: 6379`);
-    }
+        - containerPort: 6379`,
+};
+
+const KICKER_STYLE = {
+  fontFamily: 'var(--font-mono-marketing, ui-monospace, monospace)',
+  fontSize: 10,
+  letterSpacing: '.1em',
+  textTransform: 'uppercase',
+} as const;
+
+export default function CustomNodeModal({ isOpen, onClose, projectId }: CustomNodeModalProps) {
+  const { user, token } = useAuthStore();
+  const { addCustomLibraryNode, addNode } = useCanvasStore();
+  const router = useRouter();
+
+  const [tech, setTech] = useState<'Terraform' | 'Ansible' | 'Kubernetes'>('Terraform');
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState('');
+  const [description, setDescription] = useState('');
+  const [rawCode, setRawCode] = useState<string>(TECH_TEMPLATES.Terraform);
+  
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
+  const [extractedParams, setExtractedParams] = useState<string[]>([]);
+  const [isValid, setIsValid] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTechDropdownOpen, setIsTechDropdownOpen] = useState(false);
+
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+  // Custom-node creation is gated by the *project's* team plan, not the
+  // signed-in user's best plan (a user can be Pro on one team and Free on the
+  // team that owns this project) — so ask the server (F3). Until it answers,
+  // fall back to the user's best plan as a first guess so the editor doesn't
+  // flash for someone who's about to see the paywall, or vice versa.
+  const entitlements = useProjectEntitlements(isOpen ? projectId : null);
+  const isPremium = entitlements?.custom_nodes_allowed ?? isPaidPlan(user?.plan);
+
+  // Swapping tech swaps the editor to that tech's starter template and clears
+  // the previous template's validation results.
+  const handleTechChange = (next: keyof typeof TECH_TEMPLATES) => {
+    setTech(next);
+    setRawCode(TECH_TEMPLATES[next]);
     setIsValid(false);
     setValidationErrors([]);
     setExtractedParams([]);
-  }, [tech]);
+  };
 
   if (!isOpen) return null;
 
@@ -458,7 +457,7 @@ spec:
                             role="option"
                             aria-selected={tech === o.value}
                             onClick={() => {
-                              setTech(o.value);
+                              handleTechChange(o.value);
                               setIsTechDropdownOpen(false);
                             }}
                             className="wp-cnm-option"

@@ -24,7 +24,7 @@ export default function OAuthCallbackPage() {
     const redirect = params.get('redirect');
 
     if (!token || !setSessionFromToken(token)) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the error is the outcome of a side effect (reading window.location.hash and writing the session into the store), which only exists after mount, so it cannot be derived on render
       setError('Sign-in failed. Please try again.');
       return;
     }

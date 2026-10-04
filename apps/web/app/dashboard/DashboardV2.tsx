@@ -222,14 +222,18 @@ function DashboardContent() {
     }
   }, [hasHydrated, token, router]);
 
-  // Auto-open the create-workspace prompt when arriving via ?create=1
+  // Auto-open the create-workspace prompt when arriving via ?create=1. The
+  // modal opens during render (when the param flips on) and the effect only
+  // strips the param from the URL so a refresh doesn't reopen it.
+  const wantsCreate = searchParams.get('create') === '1';
+  const [seenWantsCreate, setSeenWantsCreate] = useState(false);
+  if (wantsCreate !== seenWantsCreate) {
+    setSeenWantsCreate(wantsCreate);
+    if (wantsCreate) setIsCreateModalOpen(true);
+  }
   useEffect(() => {
-    if (searchParams.get('create') === '1') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setIsCreateModalOpen(true);
-      router.replace('/dashboard');
-    }
-  }, [searchParams, router]);
+    if (wantsCreate) router.replace('/dashboard');
+  }, [wantsCreate, router]);
 
   // Global command palette shortcut (product-memory 08.5 item A8) — Cmd/Ctrl+K
   // from anywhere on the page, matching the convention this shortcut carries
