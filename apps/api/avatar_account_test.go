@@ -496,6 +496,199 @@ func TestWorkspaceSyncRejectsUsersWithoutProjectAccess(t *testing.T) {
 	conn.Close()
 }
 
+// syncRoom is a sync server plus a dial helper for the relay-authorization tests.
+type syncRoom struct {
+	t     *testing.T
+	url   string
+	conns []*websocket.Conn
+}
+
+func newSyncRoom(t *testing.T) *syncRoom {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspace/{projectId}/sync", handleWorkspaceWebSocketSync)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return &syncRoom{t: t, url: "ws" + strings.TrimPrefix(srv.URL, "http")}
+}
+
+func (s *syncRoom) dial(projectID, userID string) *websocket.Conn {
+	s.t.Helper()
+	tok, _ := GenerateToken(userID, userID+"@test.com", "n", true)
+	c, _, err := websocket.DefaultDialer.Dial(s.url+"/api/workspace/"+projectID+"/sync?token="+tok, http.Header{"Origin": {allowedOrigin()}})
+	if err != nil {
+		s.t.Fatalf("dial %s: %v", userID, err)
+	}
+	s.t.Cleanup(func() { c.Close() })
+
+	// Let the join handshake finish before returning: wait for the new
+	// socket's init and for every earlier socket to receive the join
+	// broadcast. broadcastToRoom does not serialize writes to a connection,
+	// so overlapping handshakes would have two handlers writing to one
+	// socket at once (and trip the race detector).
+	readType := func(c *websocket.Conn, want string) {
+		s.t.Helper()
+		_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+		for {
+			var m SyncMessage
+			if err := c.ReadJSON(&m); err != nil {
+				s.t.Fatalf("waiting for %q: %v", want, err)
+			}
+			if m.Type == want {
+				return
+			}
+		}
+	}
+	readType(c, "init")
+	for _, prev := range s.conns {
+		readType(prev, "join")
+	}
+	s.conns = append(s.conns, c)
+	return c
+}
+
+// readUntilCursor drains c until it sees a cursor message from wantSender and
+// returns every message seen before it. Messages from one sender arrive in the
+// order sent, so a cursor sent after a probe message proves the probe was
+// either already relayed or dropped.
+func readUntilCursor(t *testing.T, c *websocket.Conn, wantSender string) []SyncMessage {
+	t.Helper()
+	var seen []SyncMessage
+	_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		var m SyncMessage
+		if err := c.ReadJSON(&m); err != nil {
+			t.Fatalf("waiting for cursor from %s: %v (saw %d messages)", wantSender, err, len(seen))
+		}
+		if m.Type == "cursor" && m.SenderID == wantSender {
+			return seen
+		}
+		seen = append(seen, m)
+	}
+}
+
+func countType(msgs []SyncMessage, typ string) int {
+	n := 0
+	for _, m := range msgs {
+		if m.Type == typ {
+			n++
+		}
+	}
+	return n
+}
+
+func TestWorkspaceSyncOnlyRelaysWritesFromEditors(t *testing.T) {
+	withTestDB(t)
+	seedUser(t, "u_owner", "u_owner@test.com")
+	seedUser(t, "u_viewer", "u_viewer@test.com")
+	seedUser(t, "u_editor", "u_editor@test.com")
+	seedTeamWithProject(t, "team_r", "u_owner", "proj_r", "u_owner")
+	for _, m := range []struct{ id, user, role string }{{"pm_v", "u_viewer", "VIEWER"}, {"pm_e", "u_editor", "EDITOR"}} {
+		if _, err := db.Exec("INSERT INTO project_members (id, project_id, user_id, role, added_by) VALUES (?, 'proj_r', ?, ?, 'u_owner')", m.id, m.user, m.role); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	room := newSyncRoom(t)
+	owner := room.dial("proj_r", "u_owner")
+	viewer := room.dial("proj_r", "u_viewer")
+	editor := room.dial("proj_r", "u_editor")
+
+	canvas := json.RawMessage(`{"nodes":[{"id":"n1"}],"edges":[]}`)
+	send := func(c *websocket.Conn, typ string, payload json.RawMessage) {
+		t.Helper()
+		if err := c.WriteJSON(SyncMessage{Type: typ, Payload: payload}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cursor := json.RawMessage(`{"x":1,"y":2}`)
+
+	// A VIEWER cannot write: canvas changes and edit-lock indicators are dropped.
+	// Neither can it forge server-originated message types to rewrite peers' presence.
+	send(viewer, "change", canvas)
+	send(viewer, "edit", json.RawMessage(`{"nodeId":"n1","isEditing":true}`))
+	send(viewer, "profile", json.RawMessage(`{"id":"u_owner","name":"forged"}`))
+	send(viewer, "leave", json.RawMessage(`[]`))
+	send(viewer, "no_such_type", canvas)
+	send(viewer, "cursor", cursor)
+	seen := readUntilCursor(t, owner, "u_viewer")
+	for _, typ := range []string{"change", "edit", "profile", "leave", "no_such_type"} {
+		if n := countType(seen, typ); n != 0 {
+			t.Fatalf("a VIEWER's %q message was relayed %d time(s) to the owner", typ, n)
+		}
+	}
+
+	// A VIEWER can still ask peers for the current canvas.
+	send(viewer, "request_sync", nil)
+	send(viewer, "cursor", cursor)
+	if n := countType(readUntilCursor(t, owner, "u_viewer"), "request_sync"); n != 1 {
+		t.Fatalf("a VIEWER's request_sync should be relayed once, got %d", n)
+	}
+
+	// An EDITOR's writes reach everyone, viewers included.
+	send(editor, "change", canvas)
+	send(editor, "cursor", cursor)
+	for name, c := range map[string]*websocket.Conn{"owner": owner, "viewer": viewer} {
+		seen := readUntilCursor(t, c, "u_editor")
+		if countType(seen, "change") != 1 {
+			t.Fatalf("an EDITOR's change should reach the %s once, saw %+v", name, seen)
+		}
+	}
+
+	// The project creator (admin) can write.
+	send(owner, "change", canvas)
+	send(owner, "cursor", cursor)
+	if countType(readUntilCursor(t, editor, "u_owner"), "change") != 1 {
+		t.Fatal("the owner's change should reach the editor")
+	}
+}
+
+func TestWorkspaceSyncRechecksRoleDuringSession(t *testing.T) {
+	withTestDB(t)
+	old := syncRoleRecheckInterval
+	syncRoleRecheckInterval = 0
+	t.Cleanup(func() { syncRoleRecheckInterval = old })
+
+	seedUser(t, "u_owner", "u_owner@test.com")
+	seedUser(t, "u_ed", "u_ed@test.com")
+	seedTeamWithProject(t, "team_d", "u_owner", "proj_d", "u_owner")
+	if _, err := db.Exec("INSERT INTO project_members (id, project_id, user_id, role, added_by) VALUES ('pm_ed', 'proj_d', 'u_ed', 'EDITOR', 'u_owner')"); err != nil {
+		t.Fatal(err)
+	}
+
+	room := newSyncRoom(t)
+	owner := room.dial("proj_d", "u_owner")
+	ed := room.dial("proj_d", "u_ed")
+	canvas := json.RawMessage(`{"nodes":[],"edges":[]}`)
+	cursor := json.RawMessage(`{"x":0,"y":0}`)
+
+	_ = ed.WriteJSON(SyncMessage{Type: "change", Payload: canvas})
+	_ = ed.WriteJSON(SyncMessage{Type: "cursor", Payload: cursor})
+	if countType(readUntilCursor(t, owner, "u_ed"), "change") != 1 {
+		t.Fatal("editor's change should be relayed before demotion")
+	}
+
+	// Demoted while connected: the open socket must lose write access.
+	if _, err := db.Exec("UPDATE project_members SET role = 'VIEWER' WHERE id = 'pm_ed'"); err != nil {
+		t.Fatal(err)
+	}
+	_ = ed.WriteJSON(SyncMessage{Type: "change", Payload: canvas})
+	_ = ed.WriteJSON(SyncMessage{Type: "cursor", Payload: cursor})
+	if n := countType(readUntilCursor(t, owner, "u_ed"), "change"); n != 0 {
+		t.Fatalf("a demoted member's change was still relayed (%d)", n)
+	}
+
+	// Removed entirely: same.
+	if _, err := db.Exec("DELETE FROM project_members WHERE id = 'pm_ed'"); err != nil {
+		t.Fatal(err)
+	}
+	_ = ed.WriteJSON(SyncMessage{Type: "change", Payload: canvas})
+	_ = ed.WriteJSON(SyncMessage{Type: "cursor", Payload: cursor})
+	if n := countType(readUntilCursor(t, owner, "u_ed"), "change"); n != 0 {
+		t.Fatalf("a removed member's change was still relayed (%d)", n)
+	}
+}
+
 func TestProfileChangeIsPushedToCollaboratorsInWorkspace(t *testing.T) {
 	withTestDB(t)
 	seedUser(t, "u_a", "a@test.com")
