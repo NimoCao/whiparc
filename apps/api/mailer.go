@@ -141,28 +141,14 @@ func (r *ResendMailer) SendVerificationEmail(toEmail, toName, verificationLink s
 	cleanEmail := sanitizeHeaderField(toEmail)
 	cleanLink := sanitizeHeaderField(verificationLink)
 
-	escapedLink := html.EscapeString(cleanLink)
-
-	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Verify your Whiparc Account</title>
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d1117; color: #c9d1d9; padding: 40px 20px;">
-  <div style="max-width: 560px; margin: 0 auto; background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px;">
-    <h1 style="color: #58a6ff; font-size: 24px; margin-top: 0;">Welcome to Whiparc!</h1>
-    <p style="font-size: 15px; line-height: 1.6; color: #8b949e;">Please verify your email address to activate your account and start orchestrating your cloud infrastructure.</p>
-    <div style="margin: 32px 0; text-align: center;">
-      <a href="%s" style="display: inline-block; background-color: #238636; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 16px;">Verify Email Address</a>
-    </div>
-    <p style="font-size: 13px; color: #8b949e;">Or copy and paste this link into your browser:</p>
-    <p style="font-size: 12px; color: #58a6ff; word-break: break-all;">%s</p>
-    <hr style="border: 0; border-top: 1px solid #30363d; margin: 32px 0 16px 0;" />
-    <p style="font-size: 12px; color: #484f58; margin: 0;">If you did not sign up for Whiparc, please disregard this email. This link will expire in 24 hours.</p>
-  </div>
-</body>
-</html>`, escapedLink, escapedLink)
+	htmlBody := renderBrandedEmail(brandedEmail{
+		Kicker:     "Account / Verify email",
+		Title:      "Welcome to Whiparc!",
+		Paragraphs: []string{"Please verify your email address to activate your account and start orchestrating your cloud infrastructure."},
+		CTALabel:   "Verify email address",
+		CTALink:    cleanLink,
+		Footer:     "If you did not sign up for Whiparc, please disregard this email. This link will expire in 24 hours.",
+	})
 
 	textBody := fmt.Sprintf("Welcome to Whiparc!\n\nPlease verify your email address by opening the following link:\n%s\n\nThis link expires in 24 hours.", cleanLink)
 
@@ -210,26 +196,14 @@ func (r *ResendMailer) SendInviteEmail(toEmail, teamName, inviterName, acceptLin
 	escapedInviter := html.EscapeString(cleanInviter)
 	escapedLink := html.EscapeString(cleanLink)
 
-	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>You've been invited to Whiparc</title>
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d1117; color: #c9d1d9; padding: 40px 20px;">
-  <div style="max-width: 560px; margin: 0 auto; background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px;">
-    <h1 style="color: #58a6ff; font-size: 24px; margin-top: 0;">You're invited to %s</h1>
-    <p style="font-size: 15px; line-height: 1.6; color: #8b949e;">%s invited you to join their team on Whiparc.</p>
-    <div style="margin: 32px 0; text-align: center;">
-      <a href="%s" style="display: inline-block; background-color: #238636; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 16px;">Accept Invite</a>
-    </div>
-    <p style="font-size: 13px; color: #8b949e;">Or copy and paste this link into your browser:</p>
-    <p style="font-size: 12px; color: #58a6ff; word-break: break-all;">%s</p>
-    <hr style="border: 0; border-top: 1px solid #30363d; margin: 32px 0 16px 0;" />
-    <p style="font-size: 12px; color: #484f58; margin: 0;">If you weren't expecting this invite, you can safely ignore this email. This link will expire in 7 days.</p>
-  </div>
-</body>
-</html>`, escapedTeam, escapedInviter, escapedLink, escapedLink)
+	htmlBody := renderBrandedEmail(brandedEmail{
+		Kicker:     "Team / Invitation",
+		Title:      "You're invited to " + cleanTeam,
+		Paragraphs: []string{cleanInviter + " invited you to join their team on Whiparc."},
+		CTALabel:   "Accept invite",
+		CTALink:    cleanLink,
+		Footer:     "If you weren't expecting this invite, you can safely ignore this email. This link will expire in 7 days.",
+	})
 
 	textBody := fmt.Sprintf("You're invited to %s\n\n%s invited you to join their team on Whiparc. Open the following link to accept:\n%s\n\nThis link expires in 7 days.", escapedTeam, escapedInviter, escapedLink)
 
@@ -272,9 +246,6 @@ func (r *ResendMailer) SendPasswordResetEmail(toEmail, toName, resetLink string,
 	cleanName := validateEmailContentName(toName)
 	cleanLink := sanitizeHeaderField(resetLink)
 
-	escapedName := html.EscapeString(cleanName)
-	escapedLink := html.EscapeString(cleanLink)
-
 	heading := "Reset your password"
 	intro := "We received a request to reset the password for your Whiparc account."
 	button := "Reset Password"
@@ -286,26 +257,14 @@ func (r *ResendMailer) SendPasswordResetEmail(toEmail, toName, resetLink string,
 		subject = "Set a password for your Whiparc account"
 	}
 
-	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>%s</title>
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d1117; color: #c9d1d9; padding: 40px 20px;">
-  <div style="max-width: 560px; margin: 0 auto; background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px;">
-    <h1 style="color: #58a6ff; font-size: 24px; margin-top: 0;">%s</h1>
-    <p style="font-size: 15px; line-height: 1.6; color: #8b949e;">Hi %s, %s</p>
-    <div style="margin: 32px 0; text-align: center;">
-      <a href="%s" style="display: inline-block; background-color: #238636; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 16px;">%s</a>
-    </div>
-    <p style="font-size: 13px; color: #8b949e;">Or copy and paste this link into your browser:</p>
-    <p style="font-size: 12px; color: #58a6ff; word-break: break-all;">%s</p>
-    <hr style="border: 0; border-top: 1px solid #30363d; margin: 32px 0 16px 0;" />
-    <p style="font-size: 12px; color: #484f58; margin: 0;">If you did not request this, you can safely ignore this email — your password will not change. This link will expire in 1 hour.</p>
-  </div>
-</body>
-</html>`, heading, heading, escapedName, intro, escapedLink, button, escapedLink)
+	htmlBody := renderBrandedEmail(brandedEmail{
+		Kicker:     "Account / Password",
+		Title:      heading,
+		Paragraphs: []string{"Hi " + cleanName + ", " + intro},
+		CTALabel:   button,
+		CTALink:    cleanLink,
+		Footer:     "If you did not request this, you can safely ignore this email — your password will not change. This link will expire in 1 hour.",
+	})
 
 	textBody := fmt.Sprintf("%s\n\nHi %s, %s\n\nOpen the following link to continue:\n%s\n\nIf you did not request this, you can safely ignore this email. This link expires in 1 hour.", heading, cleanName, intro, cleanLink)
 
@@ -348,29 +307,14 @@ func (r *ResendMailer) SendEmailChangeVerification(toEmail, toName, confirmLink 
 	cleanName := validateEmailContentName(toName)
 	cleanLink := sanitizeHeaderField(confirmLink)
 
-	escapedName := html.EscapeString(cleanName)
-	escapedLink := html.EscapeString(cleanLink)
-
-	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Confirm your new email</title>
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d1117; color: #c9d1d9; padding: 40px 20px;">
-  <div style="max-width: 560px; margin: 0 auto; background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px;">
-    <h1 style="color: #58a6ff; font-size: 24px; margin-top: 0;">Confirm your new email</h1>
-    <p style="font-size: 15px; line-height: 1.6; color: #8b949e;">Hi %s, we received a request to change the email address on your Whiparc account to this one. Confirm it below.</p>
-    <div style="margin: 32px 0; text-align: center;">
-      <a href="%s" style="display: inline-block; background-color: #238636; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; font-size: 16px;">Confirm Email</a>
-    </div>
-    <p style="font-size: 13px; color: #8b949e;">Or copy and paste this link into your browser:</p>
-    <p style="font-size: 12px; color: #58a6ff; word-break: break-all;">%s</p>
-    <hr style="border: 0; border-top: 1px solid #30363d; margin: 32px 0 16px 0;" />
-    <p style="font-size: 12px; color: #484f58; margin: 0;">If you did not request this, you can safely ignore this email — your account's email will not change. This link will expire in 24 hours.</p>
-  </div>
-</body>
-</html>`, escapedName, escapedLink, escapedLink)
+	htmlBody := renderBrandedEmail(brandedEmail{
+		Kicker:     "Account / Email change",
+		Title:      "Confirm your new email",
+		Paragraphs: []string{"Hi " + cleanName + ", we received a request to change the email address on your Whiparc account to this one. Confirm it below."},
+		CTALabel:   "Confirm email",
+		CTALink:    cleanLink,
+		Footer:     "If you did not request this, you can safely ignore this email — your account's email will not change. This link will expire in 24 hours.",
+	})
 
 	textBody := fmt.Sprintf("Confirm your new email\n\nHi %s, we received a request to change the email address on your Whiparc account to this one.\n\nOpen the following link to confirm:\n%s\n\nIf you did not request this, you can safely ignore this email. This link expires in 24 hours.", cleanName, cleanLink)
 
@@ -418,24 +362,15 @@ func (r *ResendMailer) SendEmailChangeNotice(toEmail, toName, newEmail string) e
 	}
 	cleanNewAddress := validateEmailContentAddress(parsedNew.Address)
 
-	escapedName := html.EscapeString(cleanName)
-	escapedNewEmail := html.EscapeString(cleanNewAddress)
-
-	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Your Whiparc email is being changed</title>
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #0d1117; color: #c9d1d9; padding: 40px 20px;">
-  <div style="max-width: 560px; margin: 0 auto; background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px;">
-    <h1 style="color: #d29922; font-size: 24px; margin-top: 0;">Your email is being changed</h1>
-    <p style="font-size: 15px; line-height: 1.6; color: #8b949e;">Hi %s, a request was made to change your Whiparc account's email to <strong style="color: #c9d1d9;">%s</strong>. We've sent a confirmation link there — your email on file only changes once that link is confirmed.</p>
-    <hr style="border: 0; border-top: 1px solid #30363d; margin: 32px 0 16px 0;" />
-    <p style="font-size: 12px; color: #484f58; margin: 0;">If you did not request this, no action is needed to stop it — it only completes if the new address is confirmed — but please contact support so we can look into it.</p>
-  </div>
-</body>
-</html>`, escapedName, escapedNewEmail)
+	htmlBody := renderBrandedEmail(brandedEmail{
+		Kicker:      "Security / Email change",
+		Title:       "Your email is being changed",
+		Paragraphs:  []string{"Hi " + cleanName + ", a request was made to change your Whiparc account's email. We've sent a confirmation link to the new address; your email on file only changes once that link is confirmed."},
+		DetailLabel: "Requested new address",
+		DetailValue: cleanNewAddress,
+		Footer:      "If you did not request this, no action is needed to stop it — it only completes if the new address is confirmed — but please contact support so we can look into it.",
+		Warn:        true,
+	})
 
 	textBody := fmt.Sprintf("Your email is being changed\n\nHi %s, a request was made to change your Whiparc account's email to %s. We've sent a confirmation link there — your email on file only changes once that link is confirmed.\n\nIf you did not request this, contact support.", cleanName, cleanNewAddress)
 

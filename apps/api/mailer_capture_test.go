@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/mail"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -56,9 +57,18 @@ func TestNotificationSubjectAndText(t *testing.T) {
 	}
 }
 
-func TestBrandedEmailHTMLEscapes(t *testing.T) {
-	out := brandedEmailHTML(`T<script>`, `intro "quoted" <b>`, `Go`, `https://whiparc.com/x?a=1&b="2"`, `foot<i>`)
-	for _, bad := range []string{"<script>", "<b>", "<i>", `b="2"`} {
+func TestBrandedEmailEscapesEveryField(t *testing.T) {
+	out := renderBrandedEmail(brandedEmail{
+		Kicker:      `K<k>`,
+		Title:       `T<script>`,
+		Paragraphs:  []string{`intro "quoted" <b>`, `second <u>`},
+		DetailLabel: `L<l>`,
+		DetailValue: `v<img src=x onerror=alert(1)>`,
+		CTALabel:    `Go<g>`,
+		CTALink:     `https://whiparc.com/x?a=1&b="2"`,
+		Footer:      `foot<i>`,
+	})
+	for _, bad := range []string{"<script>", "<b>", "<u>", "<i>", "<k>", "<l>", "<g>", "<img src=x", `b="2"`} {
 		if strings.Contains(out, bad) {
 			t.Fatalf("unescaped %q in output", bad)
 		}
@@ -66,9 +76,123 @@ func TestBrandedEmailHTMLEscapes(t *testing.T) {
 	if !strings.Contains(out, "&amp;b=&#34;2&#34;") {
 		t.Fatalf("link not escaped as an attribute value: %s", out)
 	}
-	if strings.Contains(brandedEmailHTML("t", "i", "", "", "f"), "<a ") {
-		t.Fatal("no CTA expected when there is no link")
+}
+
+func TestBrandedEmailStructure(t *testing.T) {
+	t.Setenv("FRONTEND_URL", "http://localhost:3000")
+	plain := renderBrandedEmail(brandedEmail{Kicker: "k", Title: "t", Paragraphs: []string{"p"}, Footer: "f"})
+	if strings.Contains(plain, "<a ") {
+		t.Fatal("no CTA or link expected when there is no link")
 	}
+	if strings.Contains(plain, "Or paste this link") {
+		t.Fatal("fallback-link block rendered without a link")
+	}
+	if strings.Contains(plain, "localhost") || !strings.Contains(plain, `src="https://whiparc.com/icons/icon-192.png"`) {
+		t.Fatal("a localhost FRONTEND_URL must not be used for the logo URL (a recipient's mail client cannot fetch it)")
+	}
+	for _, want := range []string{"prefers-color-scheme: dark", `name="color-scheme"`, ">whip<", ">arc<", "#FF6A3D"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("template missing %q", want)
+		}
+	}
+	// The dark-mode panel rule must not recolour the top border, which carries
+	// the orange (or amber) accent bar; a blanket border-color did exactly that.
+	if strings.Contains(plain, ".wp-panel { background-color: #17181C !important; border-color:") {
+		t.Fatal("dark-mode .wp-panel must not override border-top-color (it erases the accent bar)")
+	}
+	// Brand rules from the design system: square corners, no web-dark-GitHub palette.
+	for _, bad := range []string{"border-radius", "#0d1117", "#161b22", "#238636", "#58a6ff"} {
+		if strings.Contains(plain, bad) {
+			t.Fatalf("template contains off-brand %q", bad)
+		}
+	}
+
+	t.Setenv("FRONTEND_URL", "https://staging.whiparc.test/")
+	if out := renderBrandedEmail(brandedEmail{Title: "t"}); !strings.Contains(out, `src="https://staging.whiparc.test/icons/icon-192.png"`) {
+		t.Fatalf("an https FRONTEND_URL should host the logo, got:\n%s", out)
+	}
+
+	withCTA := renderBrandedEmail(brandedEmail{Title: "t", CTALabel: "Go", CTALink: "https://whiparc.com/a"})
+	if strings.Count(withCTA, `href="https://whiparc.com/a"`) != 2 {
+		t.Fatal("expected the link as both the button and the paste-able fallback")
+	}
+	if !strings.Contains(withCTA, "background-color:#FF6A3D") || !strings.Contains(withCTA, "color:#101114") {
+		t.Fatal("button must be brand orange with ink text (the AA-safe pair)")
+	}
+
+	warn := renderBrandedEmail(brandedEmail{Title: "t", Warn: true})
+	if !strings.Contains(warn, "border-top:3px solid #F59E0B") || strings.Contains(warn, "border-top:3px solid #FF6A3D") {
+		t.Fatal("security notices use the amber accent")
+	}
+}
+
+func TestLegacyResendEmailsUseBrandTemplate(t *testing.T) {
+	var htmls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		htmls = append(htmls, p["html"].(string))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// The five pre-existing methods still post to the real Resend URL, so route
+	// them to the test server through the client's transport.
+	m := &ResendMailer{apiKey: "re_test", from: "Whiparc <noreply@whiparc.com>", client: &http.Client{Transport: rewriteTransport{target: srv.URL}}}
+
+	if err := m.SendVerificationEmail("a@acme-corp.dev", "Ada", "https://whiparc.com/verify-email?token=abc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SendInviteEmail("a@acme-corp.dev", "Platform Team", "Grace", "https://whiparc.com/invites/accept?token=abc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SendPasswordResetEmail("a@acme-corp.dev", "Ada", "https://whiparc.com/reset-password?token=abc", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SendPasswordResetEmail("a@acme-corp.dev", "Ada", "https://whiparc.com/reset-password?token=abc", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SendEmailChangeVerification("new@acme-corp.dev", "Ada", "https://whiparc.com/verify-email-change?token=abc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SendEmailChangeNotice("old@acme-corp.dev", "Ada", "new@acme-corp.dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantTitle := []string{"Welcome to Whiparc!", "You&#39;re invited to Platform Team", "Reset your password", "Set a password", "Confirm your new email", "Your email is being changed"}
+	if len(htmls) != len(wantTitle) {
+		t.Fatalf("got %d emails, want %d", len(htmls), len(wantTitle))
+	}
+	for i, h := range htmls {
+		if !strings.Contains(h, "<h1") || !strings.Contains(h, wantTitle[i]) {
+			t.Fatalf("email %d missing title %q", i, wantTitle[i])
+		}
+		if strings.Contains(h, "#0d1117") || strings.Contains(h, "#238636") || strings.Contains(h, "border-radius") {
+			t.Fatalf("email %d still carries the old GitHub-dark styling", i)
+		}
+		if !strings.Contains(h, "prefers-color-scheme: dark") || !strings.Contains(h, "Space Grotesk") {
+			t.Fatalf("email %d is not on the shared brand template", i)
+		}
+	}
+	for i := 0; i < 5; i++ {
+		if !strings.Contains(htmls[i], `href="https://whiparc.com/`) {
+			t.Fatalf("email %d lost its action link", i)
+		}
+	}
+	if !strings.Contains(htmls[5], "new@acme-corp.dev") || !strings.Contains(htmls[5], "#F59E0B") {
+		t.Fatal("the change notice must show the requested address in a detail box with the amber accent")
+	}
+	if strings.Contains(htmls[5], "<a href") {
+		t.Fatal("the change notice has no action link")
+	}
+}
+
+type rewriteTransport struct{ target string }
+
+func (rt rewriteTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	u, _ := url.Parse(rt.target)
+	r.URL.Scheme, r.URL.Host = u.Scheme, u.Host
+	return http.DefaultTransport.RoundTrip(r)
 }
 
 func TestBuildPlainMessageCannotInjectHeaders(t *testing.T) {

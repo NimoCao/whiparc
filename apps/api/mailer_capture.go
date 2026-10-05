@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"html"
 	"log"
 	"mime"
 	"net/http"
@@ -124,38 +123,6 @@ func notificationText(n InboxNotification) string {
 	return b.String()
 }
 
-// brandedEmailHTML renders the shared transactional layout. Every
-// parameter is HTML-escaped here, so callers pass raw strings. The palette
-// is the brand's light theme (orange #FF6A3D with ink #101114 text, the
-// pairing that clears AA contrast; see product-memory 05.6).
-func brandedEmailHTML(title, intro, ctaLabel, ctaLink, footer string) string {
-	var cta string
-	if ctaLink != "" {
-		escapedLink := html.EscapeString(ctaLink)
-		cta = fmt.Sprintf(`<div style="margin: 28px 0; text-align: left;">
-      <a href="%s" style="display: inline-block; background-color: #FF6A3D; color: #101114; text-decoration: none; padding: 12px 24px; font-weight: 600; font-size: 15px;">%s</a>
-    </div>
-    <p style="font-size: 13px; color: #5a5d66; margin: 0 0 6px 0;">Or copy and paste this link into your browser:</p>
-    <p style="font-size: 12px; color: #c2410c; word-break: break-all; margin: 0;">%s</p>`, escapedLink, html.EscapeString(ctaLabel), escapedLink)
-	}
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>%s</title>
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f5f5f6; color: #101114; padding: 40px 20px; margin: 0;">
-  <div style="max-width: 560px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e1e2e6; padding: 32px;">
-    <h1 style="font-size: 22px; margin: 0 0 14px 0; color: #101114;">%s</h1>
-    <p style="font-size: 15px; line-height: 1.6; color: #5a5d66; margin: 0;">%s</p>
-    %s
-    <hr style="border: 0; border-top: 1px solid #e1e2e6; margin: 28px 0 14px 0;" />
-    <p style="font-size: 12px; line-height: 1.5; color: #6b6e78; margin: 0;">%s</p>
-  </div>
-</body>
-</html>`, html.EscapeString(title), html.EscapeString(title), html.EscapeString(intro), cta, html.EscapeString(footer))
-}
-
 // ---------------------------------------------------------------------
 // Console (local development)
 // ---------------------------------------------------------------------
@@ -220,13 +187,14 @@ func (r *ResendMailer) SendNewsletterConfirmation(toEmail, confirmLink, unsubscr
 	cleanConfirm := sanitizeHeaderField(confirmLink)
 	cleanUnsub := sanitizeHeaderField(unsubscribeLink)
 
-	htmlBody := brandedEmailHTML(
-		"Confirm your subscription",
-		"Thanks for your interest in Whiparc. Confirm your email address to receive occasional product updates. You will not be subscribed until you do.",
-		"Confirm subscription",
-		cleanConfirm,
-		"If you did not ask for this, ignore this email and nothing will happen. This link expires in 48 hours.",
-	)
+	htmlBody := renderBrandedEmail(brandedEmail{
+		Kicker:     "Updates / Confirm",
+		Title:      "Confirm your subscription",
+		Paragraphs: []string{"Thanks for your interest in Whiparc. Confirm your email address to receive occasional product updates. You will not be subscribed until you do."},
+		CTALabel:   "Confirm subscription",
+		CTALink:    cleanConfirm,
+		Footer:     "If you did not ask for this, ignore this email and nothing will happen. This link expires in 48 hours.",
+	})
 	textBody := fmt.Sprintf("Thanks for your interest in Whiparc.\n\nConfirm your subscription to product updates by opening this link:\n%s\n\nIf you did not ask for this, ignore this email and you will not be subscribed. The link expires in 48 hours.\n\nUnsubscribe: %s\n", cleanConfirm, cleanUnsub)
 
 	if err := r.post(map[string]interface{}{
@@ -247,12 +215,12 @@ func (r *ResendMailer) SendContactAcknowledgement(toEmail, toName string) error 
 	cleanEmail := sanitizeHeaderField(toEmail)
 	greeting := validateEmailContentName(toName)
 
-	htmlBody := brandedEmailHTML(
-		"We got your message",
-		fmt.Sprintf("Hi %s, thanks for writing to Whiparc. Your message reached us and we will reply by email.", greeting),
-		"", "",
-		"This is an automatic acknowledgement. If you did not contact Whiparc, you can ignore it.",
-	)
+	htmlBody := renderBrandedEmail(brandedEmail{
+		Kicker:     "Contact / Received",
+		Title:      "We got your message",
+		Paragraphs: []string{fmt.Sprintf("Hi %s, thanks for writing to Whiparc. Your message reached us and we will reply by email.", greeting)},
+		Footer:     "This is an automatic acknowledgement. If you did not contact Whiparc, you can ignore it.",
+	})
 	textBody := fmt.Sprintf("Hi %s,\n\nThanks for writing to Whiparc. Your message reached us and we will reply by email.\n\nThis is an automatic acknowledgement. If you did not contact Whiparc, you can ignore it.\n", greeting)
 
 	if err := r.post(map[string]interface{}{
