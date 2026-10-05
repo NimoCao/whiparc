@@ -438,7 +438,7 @@ function AccountContent() {
                   required
                   value={profileName}
                   onChange={(e) => setProfileName(e.target.value)}
-                  placeholder="Priya Raghavan"
+                  placeholder="Richard Henricks"
                   style={{ height: 36, padding: '0 10px', border: '1px solid var(--line)', background: 'var(--elevated)', color: 'var(--ink)', fontSize: 13.5, fontFamily: 'var(--font-body-marketing), sans-serif', outline: 'none' }}
                 />
               </label>

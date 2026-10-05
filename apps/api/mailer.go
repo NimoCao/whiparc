@@ -64,6 +64,10 @@ type EmailSender interface {
 	SendPasswordResetEmail(toEmail, toName, resetLink string, hasPassword bool) error
 	SendEmailChangeVerification(toEmail, toName, confirmLink string) error
 	SendEmailChangeNotice(toEmail, toName, newEmail string) error
+	// Marketing-site email capture; implemented in mailer_capture.go.
+	SendNewsletterConfirmation(toEmail, confirmLink, unsubscribeLink string) error
+	SendContactAcknowledgement(toEmail, toName string) error
+	SendInboxNotification(toEmail string, n InboxNotification) error
 }
 
 type ConsoleMailer struct{}
@@ -128,6 +132,9 @@ type ResendMailer struct {
 	apiKey string
 	from   string
 	client *http.Client
+	// endpoint overrides the Resend API URL; empty means production. Only
+	// the methods in mailer_capture.go honor it (tests point it at httptest).
+	endpoint string
 }
 
 func (r *ResendMailer) SendVerificationEmail(toEmail, toName, verificationLink string) error {
@@ -689,7 +696,7 @@ func (s *SMTPMailer) sendMail(addr string, auth smtp.Auth, from string, to []str
 		log.Printf("[EMAIL] Warning: smtp quit returned error: %v\n", err)
 	}
 
-	log.Printf("[EMAIL] Verification email sent to %v via SMTP\n", to)
+	log.Printf("[EMAIL] Email sent to %v via SMTP\n", to)
 	return nil
 }
 
