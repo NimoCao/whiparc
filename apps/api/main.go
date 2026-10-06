@@ -1914,7 +1914,12 @@ func handleWorkspaceWebSocketSync(w http.ResponseWriter, r *http.Request) {
 	}
 	broadcastToRoom(projectId, joinMsg, conn)
 
-	// Read loop
+	// Read loop. canEdit/editorCheckedAt cache the EDITOR-role check below;
+	// only this goroutine touches them.
+	var (
+		canEdit         bool
+		editorCheckedAt time.Time
+	)
 	for {
 		_, msgBytes, err := conn.ReadMessage()
 		if err != nil {
@@ -1924,6 +1929,26 @@ func handleWorkspaceWebSocketSync(w http.ResponseWriter, r *http.Request) {
 		var msg SyncMessage
 		if err := json.Unmarshal(msgBytes, &msg); err != nil {
 			continue
+		}
+
+		// The relay is a trust boundary: peers apply these messages straight
+		// into their live view, so a socket may only relay what its project
+		// role allows, and only message types clients are meant to originate.
+		minRole, relayable := syncRelayMinRole(msg.Type)
+		if !relayable {
+			continue
+		}
+		if minRole == "EDITOR" {
+			// Re-evaluated (at most every syncRoleRecheckInterval) rather than
+			// fixed at handshake, so a member demoted or removed mid-session
+			// stops being able to write without having to reconnect.
+			if time.Since(editorCheckedAt) >= syncRoleRecheckInterval {
+				canEdit, _, _ = checkProjectAccess(client.userID, projectId, "EDITOR")
+				editorCheckedAt = time.Now()
+			}
+			if !canEdit {
+				continue
+			}
 		}
 
 		// Fill system metadata details
@@ -1959,6 +1984,26 @@ func handleWorkspaceWebSocketSync(w http.ResponseWriter, r *http.Request) {
 		Payload:    leavePayload,
 	}
 	broadcastToRoom(projectId, leaveMsg, nil)
+}
+
+// syncRoleRecheckInterval bounds how stale the cached EDITOR-role decision for
+// an open sync socket can be. A package var so tests can force a re-check on
+// every message.
+var syncRoleRecheckInterval = 5 * time.Second
+
+// syncRelayMinRole returns the minimum project role a socket needs for the
+// server to relay a client-originated message of the given type, and false for
+// types clients may not originate. Server-originated types (init, join, leave,
+// profile) are deliberately absent: relaying them from a client would let any
+// socket forge the presence roster or another user's profile on its peers.
+func syncRelayMinRole(msgType string) (minRole string, relayable bool) {
+	switch msgType {
+	case "cursor", "request_sync":
+		return "VIEWER", true
+	case "change", "edit":
+		return "EDITOR", true
+	}
+	return "", false
 }
 
 // roomMembersLocked snapshots a room's presence list. Caller must hold the
