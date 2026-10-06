@@ -1,0 +1,22 @@
+name: Set up Jsign
+description: >
+  Installs Jsign (Authenticode signer that runs on Linux) and osslsigncode
+  (used to verify a signature was really embedded), and exports JSIGN_JAR.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Jsign and osslsigncode
+      shell: bash
+      env:
+        JSIGN_VERSION: '7.5'
+        # SHA-256 of jsign-7.5.jar as published on the GitHub release.
+        # Bump both together; the checksum is what stops a tampered download
+        # from ever touching the signing credentials.
+        JSIGN_SHA256: 602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c
+      run: |
+        sudo apt-get update && sudo apt-get install -y osslsigncode
+        JAR="${RUNNER_TEMP}/jsign-${JSIGN_VERSION}.jar"
+        curl -fsSL -o "$JAR" "https://github.com/ebourg/jsign/releases/download/${JSIGN_VERSION}/jsign-${JSIGN_VERSION}.jar"
+        echo "${JSIGN_SHA256}  ${JAR}" | sha256sum -c -
+        echo "JSIGN_JAR=${JAR}" >> "$GITHUB_ENV"

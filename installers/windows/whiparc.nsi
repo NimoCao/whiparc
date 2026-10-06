@@ -7,7 +7,7 @@
 ;
 ; Build (from the repo root, with the target binary already built as
 ; whiparc-windows-amd64.exe next to this script or passed via /DSOURCE_BINARY):
-;   makensis /DVERSION=1.2.3 /DSOURCE_BINARY=..\..\whiparc-windows-amd64.exe installers\windows\whiparc.nsi
+;   makensis /DVERSION=1.2.3 /DVERSION_NUMERIC=1.2.3.0 /DSOURCE_BINARY=..\..\whiparc-windows-amd64.exe installers\windows\whiparc.nsi
 ;
 ; Produces whiparc-setup-windows-amd64.exe in the current directory.
 
@@ -15,6 +15,12 @@ Unicode true
 
 !ifndef VERSION
   !define VERSION "0.0.0-dev"
+!endif
+!ifndef VERSION_NUMERIC
+  ; VIProductVersion must be a strict X.X.X.X number — semver prerelease
+  ; suffixes ("1.2.3-beta.1") are rejected, so CI passes the numeric core
+  ; separately via /DVERSION_NUMERIC.
+  !define VERSION_NUMERIC "0.0.0.0"
 !endif
 !ifndef SOURCE_BINARY
   !define SOURCE_BINARY "whiparc-windows-amd64.exe"
@@ -61,12 +67,13 @@ ShowUninstDetails show
 
 !insertmacro MUI_LANGUAGE "English"
 
-VIProductVersion "0.0.0.0"
+VIProductVersion "${VERSION_NUMERIC}"
 VIAddVersionKey "ProductName" "${APP_NAME} CLI"
 VIAddVersionKey "FileDescription" "${APP_NAME} CLI installer"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileVersion" "${VERSION}"
-VIAddVersionKey "LegalCopyright" "Whiparc"
+VIAddVersionKey "CompanyName" "Whiparc"
+VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 Whiparc"
 
 ; ---------------------------------------------------------------------------
 ; StrStr: classic public-domain NSIS substring-search recipe. Used so the
