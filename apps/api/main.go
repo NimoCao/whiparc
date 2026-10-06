@@ -286,13 +286,18 @@ func main() {
 	// Initialize mailer, billing provider, and rate limiters
 	emailSender = NewEmailSender()
 	billingProvider = NewPaddleProvider()
-	signupLimiter = NewRateLimiter(5, 1*time.Hour, 5)         // 5 signups per hour per IP
-	loginLimiter = NewRateLimiter(10, 15*time.Minute, 10)     // 10 logins per 15 min per IP
-	resendLimiter = NewRateLimiter(3, 15*time.Minute, 3)      // 3 resends per 15 min per user/IP
-	forgotLimiter = NewRateLimiter(5, 15*time.Minute, 5)      // 5 forgot-password requests per 15 min per IP
-	emailChangeLimiter = NewRateLimiter(5, 15*time.Minute, 5) // 5 email-change requests per 15 min per user
-	avatarLimiter = NewRateLimiter(10, 15*time.Minute, 10)    // 10 avatar uploads per 15 min per user
-	deleteAcctLimiter = NewRateLimiter(5, 15*time.Minute, 5)  // 5 account-deletion attempts per 15 min per user (password guessing guard)
+	signupLimiter = NewRateLimiter(5, 1*time.Hour, 5)            // 5 signups per hour per IP
+	loginLimiter = NewRateLimiter(10, 15*time.Minute, 10)        // 10 logins per 15 min per IP
+	resendLimiter = NewRateLimiter(3, 15*time.Minute, 3)         // 3 resends per 15 min per user/IP
+	forgotLimiter = NewRateLimiter(5, 15*time.Minute, 5)         // 5 forgot-password requests per 15 min per IP
+	emailChangeLimiter = NewRateLimiter(5, 15*time.Minute, 5)    // 5 email-change requests per 15 min per user
+	avatarLimiter = NewRateLimiter(10, 15*time.Minute, 10)       // 10 avatar uploads per 15 min per user
+	deleteAcctLimiter = NewRateLimiter(5, 15*time.Minute, 5)     // 5 account-deletion attempts per 15 min per user (password guessing guard)
+	subscribeLimiter = NewRateLimiter(5, 15*time.Minute, 5)      // 5 newsletter signups per 15 min per IP
+	subscribeGlobalLimiter = NewRateLimiter(120, time.Hour, 120) // ceiling on confirmation emails per hour, holds even if X-Forwarded-For is spoofed
+	contactLimiter = NewRateLimiter(3, time.Hour, 3)             // 3 contact messages per hour per IP
+	contactGlobalLimiter = NewRateLimiter(60, time.Hour, 60)     // ceiling on contact messages (and acknowledgements) per hour
+	captureTokenLimiter = NewRateLimiter(30, 15*time.Minute, 30) // newsletter confirm/unsubscribe attempts per 15 min per IP
 
 	// Set up routing
 	mux := http.NewServeMux()
@@ -390,6 +395,15 @@ func main() {
 	mux.Handle("GET /api/projects/{id}/custom-nodes", AuthMiddleware(RequireProjectRole("VIEWER")(http.HandlerFunc(handleGetCustomNodes))))
 	mux.Handle("POST /api/projects/{id}/custom-nodes", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleCreateCustomNode))))
 	mux.Handle("DELETE /api/projects/{id}/custom-nodes/{nodeId}", AuthMiddleware(RequireProjectRole("EDITOR")(http.HandlerFunc(handleDeleteCustomNode))))
+
+	// Marketing-site email capture (public, no auth). Inbound mail is a
+	// server-to-server webhook gated by INBOUND_EMAIL_SECRET, so it carries
+	// no CORS headers. See product-memory 11.1.
+	mux.HandleFunc("POST /api/newsletter/subscribe", enableCORS(handleNewsletterSubscribe))
+	mux.HandleFunc("POST /api/newsletter/confirm", enableCORS(handleNewsletterConfirm))
+	mux.HandleFunc("POST /api/newsletter/unsubscribe", enableCORS(handleNewsletterUnsubscribe))
+	mux.HandleFunc("POST /api/contact", enableCORS(handleContact))
+	mux.HandleFunc("POST /api/inbound/email", handleInboundEmail)
 
 	// Template Catalog Routes (public, no auth — see product-memory 01.3
 	// and 08.1 in whiparc/cloud for schema rationale and MVP scope notes)

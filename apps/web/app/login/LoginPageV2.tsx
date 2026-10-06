@@ -227,7 +227,7 @@ export function LoginPageV2() {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Priya Raghavan"
+                  placeholder="Richard Henricks"
                   className="wp-login-input"
                   style={inputStyle}
                 />

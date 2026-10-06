@@ -165,3 +165,310 @@
     display: none !important;
   }
 }
+
+/* ------------------------------------------------------------------
+   Footer (Footer.tsx, NewsletterForm.tsx)
+
+   Every colour here is a token (--ink, --line, --panel, ...). The marketing
+   engine repaints those tokens on each [data-band] element (and on the root
+   for forced DARK/LIGHT), so the footer follows the theme without any
+   theme-specific rule in this file.
+   ------------------------------------------------------------------ */
+
+.wp-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Honeypot field: off-screen rather than display:none, which many bots skip. */
+.wp-hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.wp-foot-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.7fr) minmax(0, 0.7fr) minmax(0, 1.5fr);
+  gap: 40px clamp(24px, 4vw, 64px);
+  padding: clamp(32px, 4vw, 52px) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.wp-foot-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.wp-foot-tagline {
+  margin: 0;
+  max-width: 24em;
+  font-family: var(--font-mono-marketing);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  line-height: 1.6;
+  color: var(--ink2);
+}
+
+.wp-foot-founder {
+  margin-top: 14px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  align-self: stretch;
+}
+
+.wp-foot-kicker {
+  margin: 0 0 14px;
+  font-family: var(--font-mono-marketing);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink3);
+}
+
+.wp-foot-founder .wp-foot-kicker {
+  margin-bottom: 8px;
+}
+
+.wp-foot-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 19px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.wp-foot-role {
+  margin: 2px 0 10px;
+  font-family: var(--font-mono-marketing);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink2);
+}
+
+.wp-foot-list,
+.wp-foot-inline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wp-foot-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 18px;
+}
+
+.wp-foot-link {
+  display: inline-block;
+  padding: 5px 0;
+  font-family: var(--font-mono-marketing);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* Beats `.wp-root a:hover` (#FF8A63), which is unreadable on the light band;
+   --accent-ink is the contrast-safe orange for each theme. */
+.wp-root a.wp-foot-link:hover {
+  color: var(--accent-ink);
+}
+
+.wp-root a.wp-foot-link:focus-visible,
+.wp-foot-textbtn:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 3px;
+}
+
+.wp-foot-news {
+  min-width: 0;
+}
+
+.wp-foot-field {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.wp-foot-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-right: 0;
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--font-body-marketing), system-ui, sans-serif;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.wp-foot-input::placeholder {
+  color: var(--ink3);
+  opacity: 1;
+}
+
+.wp-foot-input:focus-visible {
+  border-color: var(--accent-ink);
+  box-shadow: inset 0 0 0 1px var(--accent-ink);
+}
+
+.wp-foot-input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.wp-foot-submit {
+  flex: 0 0 auto;
+  height: 46px;
+  padding: 0 20px;
+  border: 1px solid var(--accent);
+  border-radius: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: var(--font-mono-marketing);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.wp-foot-submit:hover:not(:disabled) {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+}
+
+/* On the light band --accent-ink is the darker orange (#C2410C), which fails
+   contrast with --on-accent text; hover there should lighten, not darken. */
+[data-theme-now='light'] .wp-foot-submit:hover:not(:disabled) {
+  background: #f0562a;
+  border-color: #f0562a;
+}
+
+.wp-foot-submit:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.wp-foot-submit:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.wp-foot-help {
+  margin: 12px 0 0;
+  max-width: 34em;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink2);
+}
+
+.wp-foot-note {
+  margin: 12px 0 0;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.wp-foot-note-ok {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.wp-foot-note-err {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.wp-foot-textbtn {
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.wp-foot-textbtn:hover {
+  color: var(--accent-ink);
+}
+
+.wp-foot-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 24px;
+  padding-top: 18px;
+  font-family: var(--font-mono-marketing);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ink2);
+}
+
+@media (max-width: 960px) {
+  .wp-foot-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wp-foot-brand,
+  .wp-foot-news {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 560px) {
+  .wp-foot-grid {
+    gap: 28px 20px;
+  }
+
+  .wp-foot-link {
+    padding: 9px 0;
+  }
+
+  /* Stack the field so the button is a full-width tap target. */
+  .wp-foot-field {
+    flex-direction: column;
+  }
+
+  .wp-foot-input {
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
+  }
+
+  .wp-foot-submit {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-foot-input,
+  .wp-foot-submit {
+    transition: none;
+  }
+}
