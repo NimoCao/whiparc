@@ -91,7 +91,7 @@ func main() {
 	sshConn, chans, reqs, err := ssh.NewClientConn(conn, "sandbox-agent-tunnel", &ssh.ClientConfig{
 		User:            "root",
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(clientSigner)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: ssh.FixedHostKey(clientPub),
 		Timeout:         5 * time.Second,
 	})
 	must(err, "ssh handshake over tunnel")
