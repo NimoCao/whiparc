@@ -277,10 +277,10 @@ func (s *SMTPMailer) senderIdentity() (header string, envelope string) {
 // new one.
 func buildPlainMessage(fromHeader, to, replyTo, subject, body string) []byte {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "From: %s\r\n", fromHeader)
-	fmt.Fprintf(&b, "To: %s\r\n", to)
+	fmt.Fprintf(&b, "From: %s\r\n", sanitizeHeaderField(fromHeader))
+	fmt.Fprintf(&b, "To: %s\r\n", sanitizeHeaderField(to))
 	if replyTo != "" {
-		fmt.Fprintf(&b, "Reply-To: %s\r\n", replyTo)
+		fmt.Fprintf(&b, "Reply-To: %s\r\n", sanitizeHeaderField(replyTo))
 	}
 	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", sanitizeHeaderField(subject)))
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))

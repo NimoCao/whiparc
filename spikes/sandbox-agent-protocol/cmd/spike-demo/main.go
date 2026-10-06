@@ -112,6 +112,7 @@ func main() {
 	for scanner.Scan() {
 		fmt.Printf("   [+%6s] %s\n", time.Since(start).Round(10*time.Millisecond), scanner.Text())
 	}
+	must(scanner.Err(), "scan stdout")
 	must(session.Wait(), "session wait")
 
 	step("Proving the allowlist: dialing a service the agent never registered")
