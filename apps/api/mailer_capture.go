@@ -271,17 +271,29 @@ func (s *SMTPMailer) senderIdentity() (header string, envelope string) {
 	return "Whiparc Team <noreply@whiparc.com>", "noreply@whiparc.com"
 }
 
+// SMTP messages in this file never contain request-derived text.
+//
+// CodeQL's go/email-injection rule has no sanitizers: any string that
+// originates in an HTTP request and reaches the message written through
+// smtp.Client.Data() is reported, however carefully it was cleaned. So the
+// SMTP transport carries only constants and server-generated links; the
+// recipient address is used solely in the SMTP envelope (RCPT TO), which is
+// not part of the message. Anything that must show a visitor's name, address
+// or message text (the owner notification) goes through the Resend transport,
+// which posts JSON over HTTPS and is not a mail-content sink. See
+// product-memory 11.1. TestSMTPMessagesNeverContainRequestText guards this.
+//
+// To is the RFC 5322 empty group because the real recipient is envelope-only.
+
 // buildPlainMessage assembles a single-part UTF-8 text message. The body is
 // base64-encoded and the header values are pre-sanitized, so nothing in the
 // body can be interpreted as a header and nothing in a header can start a
-// new one.
-func buildPlainMessage(fromHeader, to, replyTo, subject, body string) []byte {
+// new one. Callers must pass only constant or server-generated subject and
+// body text (see the note above).
+func buildPlainMessage(fromHeader, subject, body string) []byte {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "From: %s\r\n", sanitizeHeaderField(fromHeader))
-	fmt.Fprintf(&b, "To: %s\r\n", sanitizeHeaderField(to))
-	if replyTo != "" {
-		fmt.Fprintf(&b, "Reply-To: %s\r\n", sanitizeHeaderField(replyTo))
-	}
+	b.WriteString("To: undisclosed-recipients:;\r\n")
 	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", sanitizeHeaderField(subject)))
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
 	fmt.Fprintf(&b, "Message-ID: <%s@whiparc.com>\r\n", generateRandomHex(16))
@@ -298,19 +310,16 @@ func buildPlainMessage(fromHeader, to, replyTo, subject, body string) []byte {
 	return b.Bytes()
 }
 
-func (s *SMTPMailer) sendPlain(toEmail, replyTo, subject, body string) error {
+// sendPlain delivers a constant-text message. toEmail is validated and used
+// only as the envelope recipient; subject and body must not be derived from
+// request data.
+func (s *SMTPMailer) sendPlain(toEmail, subject, body string) error {
 	parsedTo, err := mail.ParseAddress(toEmail)
 	if err != nil || !safeEmailAddressPattern.MatchString(parsedTo.Address) {
 		return fmt.Errorf("invalid recipient address")
 	}
-	cleanReplyTo := ""
-	if replyTo != "" {
-		if parsed, err := mail.ParseAddress(replyTo); err == nil && safeEmailAddressPattern.MatchString(parsed.Address) {
-			cleanReplyTo = parsed.Address
-		}
-	}
 	fromHeader, envelope := s.senderIdentity()
-	msg := buildPlainMessage(fromHeader, parsedTo.Address, cleanReplyTo, subject, body)
+	msg := buildPlainMessage(fromHeader, subject, body)
 
 	return s.sendMail(fmt.Sprintf("%s:%d", s.host, s.port), s.plainAuth(), envelope, []string{parsedTo.Address}, msg)
 }
@@ -333,14 +342,26 @@ func (s *SMTPMailer) SendNewsletterConfirmation(toEmail, confirmLink, unsubscrib
 	}
 	body := fmt.Sprintf("Thanks for your interest in Whiparc.\n\nConfirm your subscription to product updates by opening this link:\n%s\n\nIf you did not ask for this, ignore this email and you will not be subscribed. The link expires in 48 hours.\n\nUnsubscribe: %s\n",
 		validateEmailContentLink(confirmURL.String()), validateEmailContentLink(unsubURL.String()))
-	return s.sendPlain(toEmail, "", "Confirm your subscription to Whiparc updates", body)
+	return s.sendPlain(toEmail, "Confirm your subscription to Whiparc updates", body)
 }
 
-func (s *SMTPMailer) SendContactAcknowledgement(toEmail, toName string) error {
-	body := fmt.Sprintf("Hi %s,\n\nThanks for writing to Whiparc. Your message reached us and we will reply by email.\n\nThis is an automatic acknowledgement. If you did not contact Whiparc, you can ignore it.\n", validateEmailContentName(toName))
-	return s.sendPlain(toEmail, "", "We got your message", body)
+// SendContactAcknowledgement over SMTP uses a generic greeting: the sender's
+// name is request data and stays out of the message (see the note above).
+func (s *SMTPMailer) SendContactAcknowledgement(toEmail, _ string) error {
+	const body = "Hi,\n\nThanks for writing to Whiparc. Your message reached us and we will reply by email.\n\nThis is an automatic acknowledgement. If you did not contact Whiparc, you can ignore it.\n"
+	return s.sendPlain(toEmail, "We got your message", body)
 }
 
+// SendInboxNotification over SMTP is a content-free alert: it says that a
+// message arrived and where it is stored, but not who sent it or what it
+// said, because that text is request data (see the note above). Use the
+// Resend transport (RESEND_API_KEY) to receive the full message by email.
 func (s *SMTPMailer) SendInboxNotification(toEmail string, n InboxNotification) error {
-	return s.sendPlain(toEmail, n.FromEmail, notificationSubject(n), notificationText(n))
+	subject := "[Whiparc] New contact message received"
+	body := "A new message arrived through the Whiparc contact form.\n\nIt is stored in the contact_messages table. The sender and text are not forwarded over SMTP; configure RESEND_API_KEY to receive the full message by email.\n"
+	if n.Kind == "inbound" {
+		subject = "[Whiparc] New inbound email received"
+		body = "A new email arrived at the Whiparc inbound webhook.\n\nIt is stored in the inbound_emails table. The sender, subject and text are not forwarded over SMTP; configure RESEND_API_KEY to receive the full message by email.\n"
+	}
+	return s.sendPlain(toEmail, subject, body)
 }

@@ -197,7 +197,7 @@ func (rt rewriteTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func TestBuildPlainMessageCannotInjectHeaders(t *testing.T) {
 	body := "hello\nBcc: attacker@acme-corp.dev\n\nMore."
-	raw := buildPlainMessage("Whiparc <hello@whiparc.com>", "owner@acme-corp.dev", "ada@acme-corp.dev", "Re: ünï\r\nBcc: attacker@acme-corp.dev", body)
+	raw := buildPlainMessage("Whiparc <hello@whiparc.com>", "Re: ünï\r\nBcc: attacker@acme-corp.dev", body)
 
 	msg, err := mail.ReadMessage(strings.NewReader(string(raw)))
 	if err != nil {
@@ -206,10 +206,16 @@ func TestBuildPlainMessageCannotInjectHeaders(t *testing.T) {
 	if msg.Header.Get("Bcc") != "" {
 		t.Fatal("a Bcc header was injected")
 	}
-	for _, h := range []string{"From", "To", "Reply-To", "Subject", "Date", "Message-Id", "Mime-Version"} {
+	for _, h := range []string{"From", "To", "Subject", "Date", "Message-Id", "Mime-Version"} {
 		if msg.Header.Get(h) == "" {
 			t.Fatalf("missing header %s", h)
 		}
+	}
+	if got := msg.Header.Get("To"); got != "undisclosed-recipients:;" {
+		t.Fatalf("To must be the empty group (the real recipient is envelope-only), got %q", got)
+	}
+	if msg.Header.Get("Reply-To") != "" {
+		t.Fatal("no Reply-To: it would carry a visitor's address into the message")
 	}
 	subject, err := (&mime.WordDecoder{}).DecodeHeader(msg.Header.Get("Subject"))
 	if err != nil || !strings.Contains(subject, "ünï") || strings.ContainsAny(subject, "\r\n") {
@@ -335,6 +341,7 @@ func TestSMTPMailerSendsCaptureEmails(t *testing.T) {
 		t.Fatalf("confirmation: %v", err)
 	}
 	got, msg, body := readSMTP(t, out)
+	// The recipient exists only in the SMTP envelope, never in the message.
 	if got.from != "hello@whiparc.com" || len(got.to) != 1 || got.to[0] != "Reader@acme-corp.dev" {
 		t.Fatalf("envelope = %+v", got)
 	}
@@ -345,24 +352,98 @@ func TestSMTPMailerSendsCaptureEmails(t *testing.T) {
 		t.Fatalf("links missing from body:\n%s", body)
 	}
 
-	// The notification carries a Reply-To so answering it reaches the sender.
-	if err := m.SendInboxNotification("owner@acme-corp.dev", InboxNotification{Kind: "contact", FromName: "Ada", FromEmail: "ada@acme-corp.dev", Body: "Hi there.\n.\nA line that is a lone dot above."}); err != nil {
+	// Over SMTP the owner notification is a content-free alert, one per kind.
+	if err := m.SendInboxNotification("owner@acme-corp.dev", InboxNotification{Kind: "contact", FromName: "Ada", FromEmail: "ada@acme-corp.dev", Body: "secret visitor text"}); err != nil {
 		t.Fatalf("notification: %v", err)
 	}
-	_, msg, body = readSMTP(t, out)
-	if msg.Header.Get("Reply-To") != "ada@acme-corp.dev" {
-		t.Fatalf("Reply-To = %q", msg.Header.Get("Reply-To"))
+	got, msg, body = readSMTP(t, out)
+	if len(got.to) != 1 || got.to[0] != "owner@acme-corp.dev" {
+		t.Fatalf("notification envelope = %+v", got)
 	}
-	if !strings.Contains(body, "Hi there.\n.\nA line that is a lone dot above.") {
-		t.Fatalf("body mangled:\n%s", body)
+	subject, _ := (&mime.WordDecoder{}).DecodeHeader(msg.Header.Get("Subject"))
+	if !strings.Contains(subject, "contact message") || !strings.Contains(body, "contact_messages") || !strings.Contains(body, "RESEND_API_KEY") {
+		t.Fatalf("unexpected contact alert: %q\n%s", subject, body)
+	}
+	if err := m.SendInboxNotification("owner@acme-corp.dev", InboxNotification{Kind: "inbound"}); err != nil {
+		t.Fatalf("inbound notification: %v", err)
+	}
+	_, msg, body = readSMTP(t, out)
+	subject, _ = (&mime.WordDecoder{}).DecodeHeader(msg.Header.Get("Subject"))
+	if !strings.Contains(subject, "inbound email") || !strings.Contains(body, "inbound_emails") {
+		t.Fatalf("unexpected inbound alert: %q\n%s", subject, body)
 	}
 
-	if err := m.SendContactAcknowledgement("ada@acme-corp.dev", "Ada\r\nBcc: x@acme-corp.dev"); err != nil {
+	if err := m.SendContactAcknowledgement("ada@acme-corp.dev", "Ada"); err != nil {
 		t.Fatalf("ack: %v", err)
 	}
-	_, msg, body = readSMTP(t, out)
-	if msg.Header.Get("Bcc") != "" || strings.Contains(body, "Bcc") {
-		t.Fatalf("injected content survived:\n%s", body)
+	_, _, body = readSMTP(t, out)
+	if !strings.HasPrefix(body, "Hi,\n") {
+		t.Fatalf("acknowledgement should use the generic greeting:\n%s", body)
+	}
+}
+
+// CodeQL's go/email-injection has no sanitizers, so the SMTP transport is built
+// to carry no request-derived text at all. This sends hostile, uniquely marked
+// values through every SMTP method and asserts none of them reach the message
+// (only the envelope). If this fails, CodeQL will fail the PR too.
+func TestSMTPMessagesNeverContainRequestText(t *testing.T) {
+	host, port, out := startFakeSMTP(t)
+	m := &SMTPMailer{host: host, port: port, from: "Whiparc <hello@whiparc.com>"}
+
+	const (
+		nameMarker = "ZZNAMEMARKER"
+		msgMarker  = "ZZMSGMARKER"
+		subjMarker = "ZZSUBJMARKER"
+		fromMarker = "zzfrommarker@acme-corp.dev"
+		toMarker   = "zztomarker@acme-corp.dev"
+	)
+	hostile := InboxNotification{
+		Kind:      "contact",
+		FromName:  nameMarker + "\r\nBcc: attacker@acme-corp.dev",
+		FromEmail: fromMarker,
+		Subject:   subjMarker,
+		Body:      msgMarker + "\n<script>alert(1)</script>",
+	}
+
+	if err := m.SendNewsletterConfirmation(toMarker, "https://whiparc.com/c?token=abc", "https://whiparc.com/u?token=def"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SendContactAcknowledgement(toMarker, nameMarker); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SendInboxNotification(toMarker, hostile); err != nil {
+		t.Fatal(err)
+	}
+	hostile.Kind = "inbound"
+	if err := m.SendInboxNotification(toMarker, hostile); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 4; i++ {
+		select {
+		case got := <-out:
+			if len(got.to) != 1 || got.to[0] != toMarker {
+				t.Fatalf("message %d: recipient missing from the envelope: %+v", i, got.to)
+			}
+			// got.data is the raw message as received; decode the base64 body too.
+			parsed, err := mail.ReadMessage(strings.NewReader(got.data))
+			if err != nil {
+				t.Fatalf("message %d unparseable: %v", i, err)
+			}
+			raw, _ := io.ReadAll(parsed.Body)
+			decoded, _ := base64.StdEncoding.DecodeString(strings.ReplaceAll(strings.TrimSpace(string(raw)), "\r\n", ""))
+			everything := got.data + "\n" + string(decoded)
+			for _, marker := range []string{nameMarker, msgMarker, subjMarker, fromMarker, toMarker, "attacker@", "<script>"} {
+				if strings.Contains(everything, marker) {
+					t.Fatalf("message %d leaked request text %q into the SMTP message:\n%s", i, marker, everything)
+				}
+			}
+			if parsed.Header.Get("Bcc") != "" || parsed.Header.Get("Reply-To") != "" {
+				t.Fatalf("message %d has an injected or request-derived header", i)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("message %d never arrived", i)
+		}
 	}
 }
 
