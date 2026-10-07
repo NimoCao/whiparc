@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      version_numeric: ${{ steps.version.outputs.version_numeric }}
       gateway_url_default: ${{ steps.version.outputs.gateway_url_default }}
       api_url_default: ${{ steps.version.outputs.api_url_default }}
     steps:
@@ -39,11 +40,22 @@ jobs:
             echo "gateway_url_default=" >> "$GITHUB_OUTPUT"
             echo "api_url_default=" >> "$GITHUB_OUTPUT"
           fi
+          # Windows VERSIONINFO needs a strict X.X.X.X number: drop any
+          # prerelease/build suffix and pad the semver core to four parts.
+          VERSION="$(grep '^version=' "$GITHUB_OUTPUT" | cut -d= -f2)"
+          CORE="${VERSION%%[-+]*}"
+          echo "version_numeric=${CORE}.0" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build CLI for ${{ matrix.goos }}/${{ matrix.goarch }}
     needs: prepare
     runs-on: ubuntu-latest
+    env:
+      # Windows code signing is on only when a certificate store is configured
+      # (repository secrets) AND the run is a push - never for pull_request
+      # runs, so a PR can't get its own modified workflow signed with the
+      # production certificate. See docs/RELEASE_SIGNING.md.
+      SIGNING_ENABLED: ${{ secrets.JSIGN_STORETYPE != '' && github.event_name == 'push' }}
     strategy:
       matrix:
         goos: [windows, darwin, linux]
@@ -67,6 +79,17 @@ jobs:
         working-directory: apps/cli
         run: go test ./...
 
+      - name: Embed Windows icon and version info
+        if: matrix.goos == 'windows'
+        working-directory: apps/cli
+        run: |
+          # Generates apps/cli/rsrc_windows_amd64.syso, which `go build`
+          # links in automatically: the Whiparc icon plus CompanyName /
+          # ProductName / version in the exe's Properties > Details tab.
+          go run github.com/tc-hib/go-winres@v0.3.3 make --arch amd64 \
+            --product-version "${{ needs.prepare.outputs.version }}" \
+            --file-version "${{ needs.prepare.outputs.version_numeric }}"
+
       - name: Build CLI Binary
         working-directory: apps/cli
         run: |
@@ -81,6 +104,31 @@ jobs:
           # Move binary to root directory for artifact uploading
           mv "${BINARY_NAME}" ../../
 
+      - name: Set up Jsign
+        if: matrix.goos == 'windows' && env.SIGNING_ENABLED == 'true'
+        uses: ./.github/actions/setup-jsign
+
+      # Sign the CLI binary itself, not just the installer: the installer
+      # embeds this exact file, and the raw .exe is also published directly.
+      - name: Sign Windows binary
+        if: matrix.goos == 'windows' && env.SIGNING_ENABLED == 'true'
+        env:
+          JSIGN_STORETYPE: ${{ secrets.JSIGN_STORETYPE }}
+          JSIGN_KEYSTORE: ${{ secrets.JSIGN_KEYSTORE }}
+          JSIGN_STOREPASS: ${{ secrets.JSIGN_STOREPASS }}
+          JSIGN_ALIAS: ${{ secrets.JSIGN_ALIAS }}
+          JSIGN_CERTFILE_B64: ${{ secrets.JSIGN_CERTFILE_B64 }}
+        run: |
+          if [ -n "$JSIGN_CERTFILE_B64" ]; then
+            echo "$JSIGN_CERTFILE_B64" | base64 -d > "$RUNNER_TEMP/signing-chain.pem"
+            export JSIGN_CERTFILE="$RUNNER_TEMP/signing-chain.pem"
+          fi
+          bash installers/windows/sign.sh whiparc-windows-amd64.exe
+
+      - name: Warn that the Windows binary is unsigned
+        if: matrix.goos == 'windows' && env.SIGNING_ENABLED != 'true' && startsWith(github.ref, 'refs/tags/cli-v')
+        run: echo "::warning::Windows binary is UNSIGNED - JSIGN_* secrets are not configured. SmartScreen will warn users. See docs/RELEASE_SIGNING.md."
+
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -93,6 +141,8 @@ jobs:
     name: Build Windows installer + Linux packages
     needs: [prepare, build]
     runs-on: ubuntu-latest
+    env:
+      SIGNING_ENABLED: ${{ secrets.JSIGN_STORETYPE != '' && github.event_name == 'push' }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
@@ -110,16 +160,45 @@ jobs:
         run: |
           mkdir -p dist
           chmod +x artifacts/whiparc-windows-amd64.exe
+          # The script path must be absolute: whiparc.nsi locates its icon and
+          # bitmap via ${__FILEDIR__}, which is only a usable path when makensis
+          # was given an absolute one — a relative script path makes makensis
+          # resolve "installers/windows/..." a second time from the script's own
+          # directory and fail to open whiparc.ico.
           makensis \
             "-DVERSION=${{ needs.prepare.outputs.version }}" \
+            "-DVERSION_NUMERIC=${{ needs.prepare.outputs.version_numeric }}" \
             "-DSOURCE_BINARY=$(pwd)/artifacts/whiparc-windows-amd64.exe" \
-            installers/windows/whiparc.nsi
+            "$(pwd)/installers/windows/whiparc.nsi"
           # NSIS writes OutFile relative to the .nsi script's own directory,
           # not this step's cwd — move it into dist/ alongside the Linux
           # packages so every installer this job produces lives in one flat
           # directory (see the nfpm step below and the upload step's single
           # `dist/*` glob, which depends on all three files being siblings).
           mv installers/windows/whiparc-setup-windows-amd64.exe dist/
+
+      - name: Set up Jsign
+        if: env.SIGNING_ENABLED == 'true'
+        uses: ./.github/actions/setup-jsign
+
+      - name: Sign Windows installer
+        if: env.SIGNING_ENABLED == 'true'
+        env:
+          JSIGN_STORETYPE: ${{ secrets.JSIGN_STORETYPE }}
+          JSIGN_KEYSTORE: ${{ secrets.JSIGN_KEYSTORE }}
+          JSIGN_STOREPASS: ${{ secrets.JSIGN_STOREPASS }}
+          JSIGN_ALIAS: ${{ secrets.JSIGN_ALIAS }}
+          JSIGN_CERTFILE_B64: ${{ secrets.JSIGN_CERTFILE_B64 }}
+        run: |
+          if [ -n "$JSIGN_CERTFILE_B64" ]; then
+            echo "$JSIGN_CERTFILE_B64" | base64 -d > "$RUNNER_TEMP/signing-chain.pem"
+            export JSIGN_CERTFILE="$RUNNER_TEMP/signing-chain.pem"
+          fi
+          bash installers/windows/sign.sh dist/whiparc-setup-windows-amd64.exe
+
+      - name: Warn that the Windows installer is unsigned
+        if: env.SIGNING_ENABLED != 'true' && startsWith(github.ref, 'refs/tags/cli-v')
+        run: echo "::warning::Windows installer is UNSIGNED - JSIGN_* secrets are not configured. SmartScreen will show 'Windows protected your PC'. See docs/RELEASE_SIGNING.md."
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -157,6 +236,10 @@ jobs:
     name: Build macOS installer
     needs: [prepare, build]
     runs-on: macos-latest
+    env:
+      # Signing + notarization run only for pushes when the Apple secrets
+      # exist (see docs/RELEASE_SIGNING.md); otherwise the pkg stays unsigned.
+      MACOS_SIGNING_ENABLED: ${{ secrets.MACOS_CERTS_P12_BASE64 != '' && github.event_name == 'push' }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
@@ -167,7 +250,37 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Import Apple signing certificates
+        if: env.MACOS_SIGNING_ENABLED == 'true'
+        env:
+          MACOS_CERTS_P12_BASE64: ${{ secrets.MACOS_CERTS_P12_BASE64 }}
+          MACOS_CERTS_P12_PASSWORD: ${{ secrets.MACOS_CERTS_P12_PASSWORD }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PW="$(uuidgen)"
+          echo "$MACOS_CERTS_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/certs.p12"
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/certs.p12" -P "$MACOS_CERTS_P12_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PW" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          rm -f "$RUNNER_TEMP/certs.p12"
+          echo "$APPLE_NOTARY_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/notary-key.p8"
+
+      - name: Warn that the macOS installer is unsigned
+        if: env.MACOS_SIGNING_ENABLED != 'true' && startsWith(github.ref, 'refs/tags/cli-v')
+        run: echo "::warning::macOS installer is UNSIGNED and NOT NOTARIZED - MACOS_* secrets are not configured. Gatekeeper will block it. See docs/RELEASE_SIGNING.md."
+
       - name: Build macOS installer
+        env:
+          APPLE_APPLICATION_IDENTITY: ${{ env.MACOS_SIGNING_ENABLED == 'true' && secrets.MACOS_APPLICATION_IDENTITY || '' }}
+          APPLE_INSTALLER_IDENTITY: ${{ env.MACOS_SIGNING_ENABLED == 'true' && secrets.MACOS_INSTALLER_IDENTITY || '' }}
+          APPLE_NOTARY_KEY_PATH: ${{ env.MACOS_SIGNING_ENABLED == 'true' && format('{0}/notary-key.p8', runner.temp) || '' }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: |
           chmod +x artifacts/whiparc-darwin-amd64 artifacts/whiparc-darwin-arm64
           VERSION="${{ needs.prepare.outputs.version }}" \
@@ -227,6 +340,16 @@ jobs:
             echo "MAKE_LATEST=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Generate SHA-256 checksums
+        run: |
+          # Lets users (and package managers) verify a download independent
+          # of whichever platform's code-signing scheme applies.
+          cd artifacts
+          sha256sum whiparc-windows-amd64.exe whiparc-setup-windows-amd64.exe \
+            whiparc-darwin-arm64 whiparc-darwin-amd64 whiparc-linux-amd64 \
+            whiparc-macos.pkg *.deb *.rpm > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -243,6 +366,41 @@ jobs:
             artifacts/whiparc-macos.pkg
             artifacts/*.deb
             artifacts/*.rpm
+            artifacts/SHA256SUMS.txt
             installers/linux/install.sh
+            installers/macos/uninstall.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  winget:
+    name: Submit to winget
+    # Stable tags only: a '-' in the version marks a prerelease (see the
+    # release job), and winget-pkgs should only ever carry stable builds.
+    # Runs after `release` so the installer URL it points at already exists.
+    if: startsWith(github.ref, 'refs/tags/cli-v') && !contains(github.ref_name, '-')
+    needs: [release]
+    runs-on: windows-latest
+    env:
+      WINGET_ENABLED: ${{ secrets.WINGET_TOKEN != '' }}
+    steps:
+      - name: Warn that winget submission is not configured
+        if: env.WINGET_ENABLED != 'true'
+        shell: pwsh
+        run: Write-Host "::warning::WINGET_TOKEN secret is not set - skipping winget submission. See installers/windows/winget/README.md."
+
+      # `wingetcreate update` clones the existing Whiparc.CLI manifest from
+      # microsoft/winget-pkgs, bumps the version, recomputes the installer
+      # SHA-256 from the URL below, and opens a pull request from the token
+      # owner's fork. The very first version must be submitted by hand (see
+      # installers/windows/winget/README.md) — `update` needs a package to
+      # already exist.
+      - name: Open winget-pkgs pull request
+        if: env.WINGET_ENABLED == 'true'
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          $version = "${{ github.ref_name }}".Substring("cli-v".Length)
+          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/whiparc-setup-windows-amd64.exe"
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          .\wingetcreate.exe update Whiparc.CLI --version $version --urls "$url|x64" --submit --token $env:WINGET_TOKEN

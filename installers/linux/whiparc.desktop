@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Whiparc CLI
+GenericName=Infrastructure CLI
+Comment=Provision, validate, and manage Whiparc workspaces from your terminal
+Exec=bash -c 'whiparc --help; echo; read -r -p "Press Enter to close..."'
+Icon=whiparc
+Terminal=true
+Categories=Development;ConsoleOnly;
+Keywords=whiparc;infrastructure;cli;

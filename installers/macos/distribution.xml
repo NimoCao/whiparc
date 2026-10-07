@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  productbuild distribution definition for the Whiparc CLI installer.
+  @VERSION@ is substituted by build-pkg.sh. The .pkg *file* icon in Finder is
+  always macOS's generic package icon (it cannot be customised from inside a
+  package); the brand mark shows in the installer window via <background>.
+-->
+<installer-gui-script minSpecVersion="2">
+    <title>Whiparc CLI</title>
+    <background file="background.png" alignment="bottomleft" scaling="none"/>
+    <background-darkAqua file="background.png" alignment="bottomleft" scaling="none"/>
+    <options customize="never" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+    <choices-outline>
+        <line choice="dev.whiparc.cli"/>
+    </choices-outline>
+    <choice id="dev.whiparc.cli" title="Whiparc CLI" description="Installs the whiparc command to /usr/local/bin.">
+        <pkg-ref id="dev.whiparc.cli"/>
+    </choice>
+    <pkg-ref id="dev.whiparc.cli" version="@VERSION@" onConclusion="none">whiparc-component.pkg</pkg-ref>
+</installer-gui-script>

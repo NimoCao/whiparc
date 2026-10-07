@@ -1,0 +1,29 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": "../../../installers/windows/whiparc.ico"
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "0.0.0.0",
+          "product_version": "0.0.0.0"
+        },
+        "info": {
+          "0409": {
+            "CompanyName": "Whiparc",
+            "FileDescription": "Whiparc CLI",
+            "FileVersion": "0.0.0-dev",
+            "InternalName": "whiparc",
+            "LegalCopyright": "Copyright (c) 2026 Whiparc",
+            "OriginalFilename": "whiparc.exe",
+            "ProductName": "Whiparc CLI",
+            "ProductVersion": "0.0.0-dev"
+          }
+        }
+      }
+    }
+  }
+}
