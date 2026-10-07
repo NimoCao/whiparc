@@ -144,6 +144,8 @@ const NAV_SECTIONS: { group: string; items: { id: string; label: string }[] }[] 
       { id: 'projects', label: 'Projects CRUD' },
       { id: 'import', label: 'Importing Code' },
       { id: 'deploy', label: 'Deploy & Runs' },
+      { id: 'config', label: 'Configuration & Flags' },
+      { id: 'ci', label: 'CI & Automation' },
     ],
   },
 ];
@@ -153,6 +155,9 @@ const SECTION_TOC: Record<string, { id: string; label: string }[]> = {
   install: [
     { id: 'install-download', label: 'Download the Installer' },
     { id: 'install-steps', label: 'Install Steps' },
+    { id: 'install-verify', label: 'Verify Your Download' },
+    { id: 'install-update', label: 'Update' },
+    { id: 'install-uninstall', label: 'Uninstall' },
   ],
   'sandbox-intro': [
     { id: 'sandbox-intro-changes', label: 'What Actually Changes' },
@@ -198,6 +203,17 @@ const SECTION_TOC: Record<string, { id: string; label: string }[]> = {
     { id: 'deploy-run', label: 'Execute Deployment Pipeline' },
     { id: 'deploy-autodestroy', label: 'Deploy With Auto-Destroy' },
   ],
+  config: [
+    { id: 'config-file', label: 'The Config File' },
+    { id: 'config-set', label: 'whiparc config set' },
+    { id: 'config-flags', label: 'Global Flags' },
+    { id: 'config-env', label: 'Environment Variables' },
+  ],
+  ci: [
+    { id: 'ci-token', label: 'Authenticating Without a Prompt' },
+    { id: 'ci-exit', label: 'Exit Codes' },
+    { id: 'ci-example', label: 'Example: GitHub Actions' },
+  ],
 };
 
 const scrollToId = (id: string) => {
@@ -208,11 +224,14 @@ const scrollToId = (id: string) => {
 // command snippets rendered in the article below — kept separate from the
 // JSX so it can be indexed without re-parsing rendered markup.
 const SEARCH_CONTENT: Record<string, string> = {
-  intro: 'Whiparc CLI integrate visual configuration layouts native infrastructure-as-code manifests synchronize local directories query workspace settings stream deployment pipelines terminals CI/CD',
-  'intro-capabilities': 'Code Reverse-Parsing Terraform HCL Ansible YAML Kubernetes manifests canvas visual blocks Live WebSocket Sync Deployment Logs Stream stdout',
+  intro: 'Whiparc CLI connect terminal visual canvas import Terraform YAML manage projects deployment pipelines live logs local Sandbox Agent CI/CD',
+  'intro-capabilities': 'Code Import Terraform HCL .tf Ansible YAML Kubernetes manifests canvas visual blocks Deployment Logs Stream WebSocket stdout Local Sandbox Agent',
   install: 'download one-click installer whiparc binary PATH automatically works from any new terminal',
   'install-download': 'download installer latest stable CLI version unsigned windows macos linux',
-  'install-steps': 'whiparc-setup-windows-amd64.exe whiparc-macos.pkg install.sh SmartScreen Gatekeeper whiparc --version manual install PATH',
+  'install-steps': 'winget install Whiparc.CLI whiparc-setup-windows-amd64.exe whiparc-macos.pkg install.sh SmartScreen Gatekeeper whiparc --version manual install PATH deb rpm',
+  'install-verify': 'verify download checksum SHA256 SHA256SUMS.txt Get-FileHash sha256sum shasum integrity',
+  'install-update': 'update upgrade newer version winget upgrade re-run installer pkg deb rpm install.sh',
+  'install-uninstall': 'uninstall remove whiparc winget uninstall Apps and features pkgutil forget apt remove rpm -e rm ~/.local/bin config .whiparc sandbox down revoke',
   'sandbox-intro': 'Local Sandbox Agent LocalStack simulated SSH targets no real cloud account compute your own machine outbound connection Docker containers laptop workstation',
   'sandbox-intro-changes': 'deploys destroys log streaming canvas Runner tunnel Docker running Free plan paired Agent Pro plan hosted sandbox',
   'sandbox-intro-docker': 'Docker Desktop licensing free individuals small businesses education open-source Podman Colima Rancher Desktop Windows WSL2',
@@ -241,14 +260,23 @@ const SEARCH_CONTENT: Record<string, string> = {
   'auth-logout': 'whiparc logout clear locally cached credentials end session',
   projects: 'workspace projects CRUD query initialize delete visual canvas projects',
   'projects-list': 'whiparc projects list',
-  'projects-create': 'whiparc projects create --name --visibility PRIVATE',
-  'projects-delete': 'whiparc projects delete --id --force',
+  'projects-create': 'whiparc projects create --name --description --visibility PRIVATE TEAM PUBLIC first team',
+  'projects-delete': 'whiparc projects delete --id --force confirmation prompt',
   import: 'importing IaC code existing configurations visual workspace resource structures nodes edges auto-arrange layout',
-  'import-file': 'whiparc import --project --file terraform main.tf single file',
-  'import-dir': 'whiparc import --project --dir deployments directory recursively scan',
+  'import-file': 'whiparc import --project project ID --file -f terraform main.tf single file',
+  'import-dir': 'whiparc import --project project ID --dir -d deployments directory recursively scan .tf .yml .yaml',
   deploy: 'deploy logs streaming visual canvas execution logs shell',
   'deploy-run': 'whiparc deploy --project deployment tracker socket progress logs real-time',
   'deploy-autodestroy': 'whiparc deploy --project --auto-destroy spin up testing systems tear down',
+  config: 'configuration config file flags environment variables ~/.whiparc/config.json',
+  'config-file': 'config.json ~/.whiparc api_url token sandbox_agent_beta gateway_url USERPROFILE credentials plaintext',
+  'config-set': 'whiparc config set api-url gateway-url sandbox-agent-beta true false default hosted localhost',
+  'config-flags': 'global flags --api-url --token --no-color --version --help NO_COLOR',
+  'config-env': 'environment variables WHIPARC_INSTALL_DIR install.sh WHIPARC_AGENT_TOKEN WHIPARC_AGENT_PROJECT_ID WHIPARC_GATEWAY_SECRET internal',
+  ci: 'CI automation continuous integration pipeline script non-interactive token',
+  'ci-token': 'whiparc --token JWT session token secret non-interactive login prompt CI',
+  'ci-exit': 'exit code status failure error scripts $? errorlevel unsuccessful',
+  'ci-example': 'GitHub Actions workflow example install CLI secrets WHIPARC_TOKEN deploy projects list',
 };
 
 type SearchIndexEntry = { key: string; sectionId: string; anchorId?: string; label: string; group: string; snippet: string };
@@ -601,7 +629,7 @@ export function DocsPageV2() {
               <p style={{ margin: 0, fontFamily: 'var(--font-mono-marketing)', fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--accent-ink)' }}>Getting started</p>
               <h1 style={{ margin: '8px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 'clamp(28px,3vw,34px)', letterSpacing: '-.01em', color: 'var(--ink)' }}>Whiparc CLI</h1>
               <p style={{ margin: '14px 0 0', fontSize: 15.5, lineHeight: 1.65, color: 'var(--ink2)', maxWidth: '38em' }}>
-                The Whiparc Command-Line Interface (<InlineCode>whiparc</InlineCode>) is a powerful tool designed to integrate visual configuration layouts directly with native infrastructure-as-code manifests. With the CLI, platform teams can synchronize local directories, query workspace settings, and stream deployment pipelines from their local terminals or CI/CD pipelines.
+                The Whiparc Command-Line Interface (<InlineCode>whiparc</InlineCode>) connects your terminal to the visual canvas. With the CLI you can import local Terraform and YAML files into a project, manage projects, trigger deployment pipelines and stream their logs, and run a local Sandbox Agent — from your own shell or from a CI job.
               </p>
 
               <div id="intro-capabilities" className="wp-blueprint" style={{ ...cardStyle, marginTop: 26 }}>
@@ -611,19 +639,19 @@ export function DocsPageV2() {
                   <li style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                     <Icon icon="lucide:check-circle-2" width={16} style={{ color: 'var(--accent-ink)', marginTop: 2, flexShrink: 0 }} />
                     <span style={{ fontSize: 13.5, color: 'var(--ink2)' }}>
-                      <strong style={{ color: 'var(--ink)' }}>Code Reverse-Parsing</strong>: Recursively parse Terraform HCL, Ansible YAML, and Kubernetes manifests into canvas visual blocks.
+                      <strong style={{ color: 'var(--ink)' }}>Code Import</strong>: Upload Terraform (<InlineCode>.tf</InlineCode>) and YAML (<InlineCode>.yml</InlineCode>/<InlineCode>.yaml</InlineCode>) files — single files or whole directories — and Whiparc turns them into canvas visual blocks.
                     </span>
                   </li>
                   <li style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                     <Icon icon="lucide:check-circle-2" width={16} style={{ color: 'var(--accent-ink)', marginTop: 2, flexShrink: 0 }} />
                     <span style={{ fontSize: 13.5, color: 'var(--ink2)' }}>
-                      <strong style={{ color: 'var(--ink)' }}>Live WebSocket Sync</strong>: Sync changes locally and see the browser visual canvas update in real-time.
+                      <strong style={{ color: 'var(--ink)' }}>Local Sandbox Agent</strong>: Run sandbox deploys against Docker containers on your own machine (opt-in beta) — see the Local Sandbox Agent section.
                     </span>
                   </li>
                   <li style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                     <Icon icon="lucide:check-circle-2" width={16} style={{ color: 'var(--accent-ink)', marginTop: 2, flexShrink: 0 }} />
                     <span style={{ fontSize: 13.5, color: 'var(--ink2)' }}>
-                      <strong style={{ color: 'var(--ink)' }}>Deployment Logs Stream</strong>: Pipe pipeline output straight to terminal stdout.
+                      <strong style={{ color: 'var(--ink)' }}>Deployment Logs Stream</strong>: Trigger a run and watch its output live over a WebSocket, straight in your terminal.
                     </span>
                   </li>
                 </ul>
@@ -653,7 +681,7 @@ export function DocsPageV2() {
                   </div>
                   <div>
                     <h3 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, color: 'var(--ink)' }}>Download the Installer</h3>
-                    <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--ink3)' }}>Always built from the latest stable CLI changes. Unsigned — see the platform notes below.</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--ink3)' }}>Always built from the latest stable CLI changes. The Windows and macOS installers are not code-signed yet — see the platform notes below.</p>
                   </div>
                 </div>
 
@@ -773,9 +801,14 @@ export function DocsPageV2() {
                 <div style={{ marginTop: 20, display: 'grid', gap: 14 }}>
                   {activeTab === 'windows' && (
                     <>
+                      <p style={bodyStyle}>
+                        <strong style={{ color: 'var(--ink)' }}>Recommended — winget.</strong> Windows Package Manager downloads and verifies the installer itself, so you won&apos;t see a SmartScreen prompt, and updates are one command:
+                      </p>
+                      <CodeBlock code="winget install Whiparc.CLI" />
+                      <p style={bodyStyle}>Or install it manually from the downloaded installer:</p>
                       <p style={bodyStyle}>1. Download and run <InlineCode>whiparc-setup-windows-amd64.exe</InlineCode> using the link above.</p>
                       <p style={bodyStyle}>2. Click through the installer. It installs to your user profile (no admin rights needed), adds itself to your <strong style={{ color: 'var(--ink)' }}>User PATH</strong>, and sets up the uninstaller — nothing to configure by hand.</p>
-                      <p style={bodyStyle}>3. Windows SmartScreen may flag the installer since it isn&apos;t code-signed yet — choose <strong style={{ color: 'var(--ink)' }}>More info → Run anyway</strong>.</p>
+                      <p style={bodyStyle}>3. Windows SmartScreen may show &ldquo;Windows protected your PC&rdquo; with an unknown publisher, since the installer isn&apos;t code-signed yet — choose <strong style={{ color: 'var(--ink)' }}>More info → Run anyway</strong>. You can check the file against the published checksum first (see Verify Your Download below).</p>
                       <p style={bodyStyle}>4. Open a new terminal and verify:</p>
                       <CodeBlock code="whiparc --version" />
                       <details className="wp-blueprint wp-docs-details" style={cardStyle}>
@@ -835,6 +868,66 @@ export function DocsPageV2() {
                     </>
                   )}
                 </div>
+              </div>
+
+
+              <div id="install-verify" style={{ marginTop: 36 }}>
+                <h3 style={h2Style}>Verify your download</h3>
+                <p style={bodyStyle}>
+                  Newer releases publish a <InlineCode>SHA256SUMS.txt</InlineCode> file next to the installers on the{' '}
+                  <a href="https://github.com/whiparc/whiparc/releases" target="_blank" rel="noreferrer" className="wp-docs-toclink" style={{ color: 'var(--accent-ink)' }}>
+                    GitHub release page
+                  </a>
+                  . Compare your file&apos;s hash with the matching line:
+                </p>
+                <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
+                  <CodeBlock code="Get-FileHash .\whiparc-setup-windows-amd64.exe -Algorithm SHA256" />
+                  <CodeBlock code="shasum -a 256 whiparc-macos.pkg" />
+                  <CodeBlock code="sha256sum --check --ignore-missing SHA256SUMS.txt" />
+                </div>
+              </div>
+
+              <div id="install-update" style={{ marginTop: 30 }}>
+                <h3 style={h2Style}>Update</h3>
+                <p style={bodyStyle}>
+                  Installing a newer version replaces the old one in place, and your settings in <InlineCode>~/.whiparc</InlineCode> are kept. Check what you have with <InlineCode>whiparc --version</InlineCode>.
+                </p>
+                <ul style={{ margin: '12px 0 0', paddingLeft: 20, display: 'grid', gap: 6, fontSize: 14.5, lineHeight: 1.65, color: 'var(--ink2)' }}>
+                  <li><strong style={{ color: 'var(--ink)' }}>Windows:</strong> <InlineCode>winget upgrade Whiparc.CLI</InlineCode>, or run the newer installer.</li>
+                  <li><strong style={{ color: 'var(--ink)' }}>macOS:</strong> open the newer <InlineCode>.pkg</InlineCode>.</li>
+                  <li><strong style={{ color: 'var(--ink)' }}>Linux:</strong> install the newer <InlineCode>.deb</InlineCode>/<InlineCode>.rpm</InlineCode>, or re-run the install script.</li>
+                </ul>
+              </div>
+
+              <div id="install-uninstall" style={{ marginTop: 30 }}>
+                <h3 style={h2Style}>Uninstall</h3>
+                <p style={bodyStyle}>
+                  If you set up the Sandbox Agent, remove it first so no service or paired Agent is left behind (skip this if you never used <InlineCode>whiparc sandbox</InlineCode>):
+                </p>
+                <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
+                  <CodeBlock code="whiparc sandbox agent uninstall" />
+                  <CodeBlock code="whiparc sandbox down --revoke" />
+                </div>
+                <p style={{ margin: '14px 0 0', ...bodyStyle }}>Then remove the CLI:</p>
+                <ul style={{ margin: '10px 0 0', paddingLeft: 20, display: 'grid', gap: 10, fontSize: 14.5, lineHeight: 1.65, color: 'var(--ink2)', listStyle: 'none' }}>
+                  <li>
+                    <strong style={{ color: 'var(--ink)' }}>Windows:</strong> Settings → Apps → <em>Whiparc CLI</em> → Uninstall (this also removes it from your PATH), or:
+                    <div style={{ marginTop: 8 }}><CodeBlock code="winget uninstall Whiparc.CLI" /></div>
+                  </li>
+                  <li>
+                    <strong style={{ color: 'var(--ink)' }}>macOS:</strong> macOS packages have no built-in uninstaller:
+                    <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
+                      <CodeBlock code="sudo rm -f /usr/local/bin/whiparc" />
+                      <CodeBlock code="sudo pkgutil --forget dev.whiparc.cli" />
+                    </div>
+                  </li>
+                  <li>
+                    <strong style={{ color: 'var(--ink)' }}>Linux:</strong> <InlineCode>sudo apt remove whiparc</InlineCode> or <InlineCode>sudo rpm -e whiparc</InlineCode> for packages; if you used the install script, delete the binary it reported (default <InlineCode>~/.local/bin/whiparc</InlineCode>).
+                  </li>
+                </ul>
+                <p style={{ margin: '14px 0 0', ...bodyStyle }}>
+                  Uninstalling leaves your saved settings and login behind. To remove those too, delete the <InlineCode>~/.whiparc</InlineCode> folder (<InlineCode>%USERPROFILE%\.whiparc</InlineCode> on Windows).
+                </p>
               </div>
 
               <div style={{ marginTop: 24 }}>
@@ -1081,19 +1174,23 @@ whiparc config set gateway-url https://gateway.<your-domain>`} />
               <p style={{ margin: '14px 0 0', ...bodyStyle }}>Query, initialize, or delete visual workspace canvas projects using the <InlineCode>projects</InlineCode> subcommand.</p>
 
               <h3 id="projects-list" style={h2Style}>List Projects</h3>
+              <p style={bodyStyle}>Prints a table of every project you can access, including its <strong style={{ color: 'var(--ink)' }}>project ID</strong> — the value the other commands take for <InlineCode>--project</InlineCode> and <InlineCode>--id</InlineCode>:</p>
               <div style={{ marginTop: 10 }}>
                 <CodeBlock code="whiparc projects list" />
               </div>
 
               <h3 id="projects-create" style={h2Style}>Create a Project</h3>
-              <p style={bodyStyle}>Initialize a new project workspace by name:</p>
+              <p style={bodyStyle}>
+                Initialize a new project workspace. <InlineCode>--visibility</InlineCode> is <InlineCode>PRIVATE</InlineCode> (default), <InlineCode>TEAM</InlineCode> or <InlineCode>PUBLIC</InlineCode>, and <InlineCode>--description</InlineCode> is optional. Leave out <InlineCode>--name</InlineCode> to be prompted. The project is created in the first team on your account:
+              </p>
               <div style={{ marginTop: 10 }}>
                 <CodeBlock code='whiparc projects create --name "My VPC Stack" --visibility PRIVATE' />
               </div>
 
               <h3 id="projects-delete" style={h2Style}>Delete a Project</h3>
+              <p style={bodyStyle}>Takes the project ID. Without <InlineCode>--force</InlineCode> you are asked to confirm first; with it, deletion is immediate and cannot be undone:</p>
               <div style={{ marginTop: 10 }}>
-                <CodeBlock code='whiparc projects delete --id "my-vpc-stack-id" --force' />
+                <CodeBlock code='whiparc projects delete --id <project-id> --force' />
               </div>
             </section>
           )}
@@ -1101,18 +1198,20 @@ whiparc config set gateway-url https://gateway.<your-domain>`} />
           {activeSection === 'import' && (
             <section>
               <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 'clamp(28px,3vw,34px)', letterSpacing: '-.01em', color: 'var(--ink)' }}>Importing IaC Code</h1>
-              <p style={{ margin: '14px 0 0', ...bodyStyle }}>You can import existing code configurations directly into your visual workspace. The engine automatically maps resource structures into nodes/edges and auto-arranges layout coordinates.</p>
+              <p style={{ margin: '14px 0 0', ...bodyStyle }}>You can import existing code configurations directly into your visual workspace. The engine automatically maps resource structures into nodes/edges and auto-arranges layout coordinates. <InlineCode>--project</InlineCode> takes the project ID (see <InlineCode>whiparc projects list</InlineCode>), not its name.</p>
 
               <h3 id="import-file" style={h2Style}>Import a Single File</h3>
-              <p style={bodyStyle}>Upload and parse a single Terraform or Kubernetes configuration:</p>
+              <p style={bodyStyle}>Upload and parse a single Terraform or YAML configuration (<InlineCode>-f</InlineCode> is short for <InlineCode>--file</InlineCode>):</p>
               <div style={{ marginTop: 10 }}>
-                <CodeBlock code='whiparc import --project "VPC-Stack" --file "./terraform/main.tf"' />
+                <CodeBlock code='whiparc import --project <project-id> --file "./terraform/main.tf"' />
               </div>
 
               <h3 id="import-dir" style={h2Style}>Import a Directory</h3>
-              <p style={bodyStyle}>Recursively scan and import all configurations from a target directory:</p>
+              <p style={bodyStyle}>
+                Recursively scan a directory (<InlineCode>-d</InlineCode> is short for <InlineCode>--dir</InlineCode>) and import every <InlineCode>.tf</InlineCode>, <InlineCode>.yml</InlineCode> and <InlineCode>.yaml</InlineCode> file in it. Other file types are skipped; if none match, nothing is uploaded. Pass either <InlineCode>--file</InlineCode> or <InlineCode>--dir</InlineCode>:
+              </p>
               <div style={{ marginTop: 10 }}>
-                <CodeBlock code='whiparc import --project "VPC-Stack" --dir "./deployments/"' />
+                <CodeBlock code='whiparc import --project <project-id> --dir "./deployments/"' />
               </div>
             </section>
           )}
@@ -1124,15 +1223,118 @@ whiparc config set gateway-url https://gateway.<your-domain>`} />
 
               <h3 id="deploy-run" style={h2Style}>Execute Deployment Pipeline</h3>
               <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
-                <CodeBlock code='whiparc deploy --project "VPC-Stack"' />
-                <p style={bodyStyle}>This command connects to the deployment tracker socket, streaming all progress logs sequentially and printing them in real-time.</p>
+                <CodeBlock code='whiparc deploy --project <project-id>' />
+                <p style={bodyStyle}>This command starts the run, connects to the deployment tracker socket, and prints the progress logs in real time. It stops streaming when the pipeline reports <InlineCode>SUCCESS</InlineCode> or <InlineCode>FAILED</InlineCode> — read that final status line, because the command&apos;s own exit code does not reflect the result (see CI &amp; Automation).</p>
               </div>
 
               <h3 id="deploy-autodestroy" style={h2Style}>Deploy with Auto-Destroy</h3>
               <p style={bodyStyle}>To spin up testing systems and tear them down immediately upon execution completion:</p>
               <div style={{ marginTop: 10 }}>
-                <CodeBlock code='whiparc deploy --project "VPC-Stack" --auto-destroy' />
+                <CodeBlock code='whiparc deploy --project <project-id> --auto-destroy' />
               </div>
+            </section>
+          )}
+
+          {activeSection === 'config' && (
+            <section>
+              <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 'clamp(28px,3vw,34px)', letterSpacing: '-.01em', color: 'var(--ink)' }}>Configuration &amp; Flags</h1>
+              <p style={{ margin: '14px 0 0', ...bodyStyle }}>Where the CLI keeps its settings, what you can change, and the flags every command accepts.</p>
+
+              <h3 id="config-file" style={h2Style}>The config file</h3>
+              <p style={bodyStyle}>
+                Settings and your login live in one JSON file: <InlineCode>~/.whiparc/config.json</InlineCode> (<InlineCode>%USERPROFILE%\.whiparc\config.json</InlineCode> on Windows). It is created by <InlineCode>whiparc login</InlineCode> and <InlineCode>whiparc config set</InlineCode>.
+              </p>
+              <div style={{ marginTop: 10 }}>
+                <CodeBlock
+                  code={`{
+  "api_url": "https://api.whiparc.com",
+  "token": "<your session token>",
+  "sandbox_agent_beta": false,
+  "gateway_url": "https://gateway.whiparc.com"
+}`}
+                />
+              </div>
+              <p style={{ margin: '10px 0 0', ...bodyStyle }}>
+                The <InlineCode>token</InlineCode> is your logged-in session stored as plain text, so treat the file like a password: don&apos;t commit it, paste it in tickets, or copy it to shared machines. <InlineCode>whiparc logout</InlineCode> clears it.
+              </p>
+
+              <h3 id="config-set" style={h2Style}>whiparc config set</h3>
+              <p style={bodyStyle}>Persists one setting for every future command:</p>
+              <div style={{ marginTop: 10 }}>
+                <CodeBlock code="whiparc config set <key> <value>" />
+              </div>
+              <div className="wp-blueprint" style={{ ...cardStyle, marginTop: 14 }}>
+                <BlueprintCorners />
+                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 10, fontSize: 13.5, lineHeight: 1.6, color: 'var(--ink2)' }}>
+                  <li><InlineCode>api-url</InlineCode> — the API backend. Defaults to <InlineCode>https://api.whiparc.com</InlineCode> in official releases, and <InlineCode>http://localhost:8080</InlineCode> in a build from source.</li>
+                  <li><InlineCode>gateway-url</InlineCode> — the Agent Gateway used by sandbox commands. Defaults to <InlineCode>https://gateway.whiparc.com</InlineCode> in official releases, and <InlineCode>http://localhost:9090</InlineCode> in a build from source.</li>
+                  <li><InlineCode>sandbox-agent-beta</InlineCode> — <InlineCode>true</InlineCode> enables the <InlineCode>sandbox</InlineCode> commands; any other value turns them off.</li>
+                </ul>
+              </div>
+              <p style={{ margin: '10px 0 0', ...bodyStyle }}>You only need <InlineCode>api-url</InlineCode> and <InlineCode>gateway-url</InlineCode> if you run your own Whiparc instance.</p>
+
+              <h3 id="config-flags" style={h2Style}>Global flags</h3>
+              <p style={bodyStyle}>These work on every command:</p>
+              <div className="wp-blueprint" style={{ ...cardStyle, marginTop: 10 }}>
+                <BlueprintCorners />
+                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'grid', gap: 10, fontSize: 13.5, lineHeight: 1.6, color: 'var(--ink2)' }}>
+                  <li><InlineCode>--api-url &lt;url&gt;</InlineCode> — use this API backend for this command instead of the saved one. <InlineCode>whiparc login --api-url …</InlineCode> also saves it for later commands.</li>
+                  <li><InlineCode>--token &lt;jwt&gt;</InlineCode> — use this session token instead of the saved one (see CI &amp; Automation).</li>
+                  <li><InlineCode>--no-color</InlineCode> — plain output. Colour is also switched off automatically when the <InlineCode>NO_COLOR</InlineCode> environment variable is set or output is piped to a file.</li>
+                  <li><InlineCode>--version</InlineCode> / <InlineCode>--help</InlineCode> — print the version, or help for any command (<InlineCode>whiparc projects --help</InlineCode>).</li>
+                </ul>
+              </div>
+
+              <h3 id="config-env" style={h2Style}>Environment variables</h3>
+              <p style={bodyStyle}>
+                <InlineCode>WHIPARC_INSTALL_DIR</InlineCode> changes where the Linux/macOS install script puts the binary (default <InlineCode>~/.local/bin</InlineCode>):
+              </p>
+              <div style={{ marginTop: 10 }}>
+                <CodeBlock code="curl -fsSL <install.sh url> | WHIPARC_INSTALL_DIR=/opt/whiparc/bin sh" />
+              </div>
+              <p style={{ margin: '10px 0 0', ...bodyStyle }}>
+                <InlineCode>WHIPARC_AGENT_TOKEN</InlineCode>, <InlineCode>WHIPARC_AGENT_PROJECT_ID</InlineCode> and <InlineCode>WHIPARC_GATEWAY_SECRET</InlineCode> are set by the CLI itself when it launches the Sandbox Agent and its SSH proxy. You never need to set them by hand.
+              </p>
+            </section>
+          )}
+
+          {activeSection === 'ci' && (
+            <section>
+              <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 'clamp(28px,3vw,34px)', letterSpacing: '-.01em', color: 'var(--ink)' }}>CI &amp; Automation</h1>
+              <p style={{ margin: '14px 0 0', ...bodyStyle }}>Running the CLI from a script or pipeline, where there is nobody to answer a prompt.</p>
+
+              <h3 id="ci-token" style={h2Style}>Authenticating without a prompt</h3>
+              <p style={bodyStyle}>
+                <InlineCode>whiparc login</InlineCode> always asks for your email and password interactively, so a pipeline can&apos;t use it. Instead, log in once on your own machine, copy the <InlineCode>token</InlineCode> value from your config file, store it as a secret in your CI system, and pass it with <InlineCode>--token</InlineCode>:
+              </p>
+              <div style={{ marginTop: 10 }}>
+                <CodeBlock code='whiparc --token "$WHIPARC_TOKEN" deploy --project <project-id>' />
+              </div>
+              <p style={{ margin: '10px 0 0', ...bodyStyle }}>
+                This is your own session token, with your permissions, and it is not a long-lived service credential — it stops working when the session expires or you run <InlineCode>whiparc logout</InlineCode>, and you will need to refresh the secret. Keep it in your CI secret store, never in the repository.
+              </p>
+
+              <h3 id="ci-exit" style={h2Style}>Exit codes</h3>
+              <p style={bodyStyle}>
+                Currently the CLI exits non-zero only for usage mistakes such as an unknown command or flag. Runtime failures — a rejected login, a failed import, or a deploy that ends in <InlineCode>FAILED</InlineCode> — are printed with a <InlineCode>✗</InlineCode> prefix but still exit with code 0. Don&apos;t rely on the exit status of a step to detect them; check the output (for example the final <InlineCode>Pipeline status changed to</InlineCode> line of a deploy) until this changes.
+              </p>
+
+              <h3 id="ci-example" style={h2Style}>Example: GitHub Actions</h3>
+              <div style={{ marginTop: 10 }}>
+                <CodeBlock
+                  code={`steps:
+  - name: Install the Whiparc CLI
+    run: curl -fsSL <install.sh url> | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+  - name: Deploy
+    env:
+      WHIPARC_TOKEN: \${{ secrets.WHIPARC_TOKEN }}
+    run: whiparc --no-color --token "$WHIPARC_TOKEN" deploy --project <project-id> | tee deploy.log`}
+                />
+              </div>
+              <p style={{ margin: '10px 0 0', ...bodyStyle }}>
+                Replace <InlineCode>&lt;install.sh url&gt;</InlineCode> with the link from the Installation Guide.
+              </p>
             </section>
           )}
         </main>

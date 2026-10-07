@@ -55,6 +55,8 @@ next-env.d.ts
 # compiled CLI binaries (build outputs, not source)
 /apps/cli/cli
 /apps/cli/cli.exe
+# go-winres output — generated per build (version info varies), never committed
+/apps/cli/*.syso
 /apps/cli/dist/
 
 # CLI binaries/installers build_cli_local.ps1 or CI drop here for local

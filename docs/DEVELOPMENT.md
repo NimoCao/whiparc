@@ -202,6 +202,51 @@ whiparc --api-url http://localhost:8080 projects list
 resolves to, so `whiparc login --api-url http://localhost:8080` both logs in
 against your local backend and leaves every later command pointed there too.
 
+## CLI Releases and Installers
+
+`.github/workflows/cli-release.yml` builds the CLI for Windows, macOS and Linux
+and packages it. Pushing a `cli-vX.Y.Z` tag publishes a GitHub Release; a push
+to `main` refreshes the rolling `cli-latest` release; pull requests build and
+upload artifacts only.
+
+| Artifact | Built by | Notes |
+| --- | --- | --- |
+| `whiparc-setup-windows-amd64.exe` | NSIS, `installers/windows/whiparc.nsi` | Per-user install, adds itself to the user PATH |
+| `whiparc-macos.pkg` | `installers/macos/build-pkg.sh` (macOS runner) | Universal binary, branded installer window |
+| `.deb` / `.rpm` | nfpm, `installers/linux/nfpm.yaml` | Also installs the app-menu icons and launcher |
+| `install.sh` | `installers/linux/install.sh` | Fallback for any other distro; honours `WHIPARC_INSTALL_DIR` |
+| `SHA256SUMS.txt` | release job | Checksums for every file above |
+
+Build a Windows installer locally (needs [NSIS](https://nsis.sourceforge.io/)
+on PATH, for example `winget install NSIS.NSIS`):
+
+```powershell
+./installers/windows/build-local.ps1 -Version 0.2.0
+```
+
+The Windows binary embeds its icon and version information through
+[go-winres](https://github.com/tc-hib/go-winres) (`apps/cli/winres/winres.json`);
+the generated `rsrc_windows_amd64.syso` is git-ignored and recreated by CI and
+`build-local.ps1`.
+
+All installer icons come from one source and are regenerated with
+`python installers/generate-icons.py` (needs `pip install pillow`).
+
+Related documents:
+
+- [RELEASE_SIGNING.md](RELEASE_SIGNING.md): Windows Authenticode signing, macOS
+  Developer ID signing and notarization, and the repository secrets they need.
+  Without those secrets the pipeline still works but ships unsigned installers
+  and logs a warning on tagged releases.
+- [`installers/windows/winget/README.md`](../installers/windows/winget/README.md):
+  the winget manifest, the one-time first submission to `microsoft/winget-pkgs`,
+  and the `WINGET_TOKEN` secret that automates later version bumps.
+
+User-facing CLI documentation lives in `apps/web/app/docs/DocsPageV2.tsx`.
+When you add or change a command, flag, config key or install path, update the
+matching section and its entries in `NAV_SECTIONS`, `SECTION_TOC` and
+`SEARCH_CONTENT` in that file, otherwise the docs search will not find it.
+
 ## CI
 
 Pull requests run `.github/workflows/ci.yml` (lint/build for `apps/web`,

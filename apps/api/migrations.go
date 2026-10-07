@@ -390,6 +390,78 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     14,
+		description: "add_email_capture_tables",
+		up: func(tx sqlExecer) error {
+			// Marketing-site email capture (footer newsletter signup, contact
+			// form) plus the inbound-mail archive. None of these reference
+			// users: a subscriber or correspondent is usually not an
+			// account holder, and deleting an account must not silently
+			// erase a consent record that belongs to the address.
+			//
+			// newsletter_subscribers keeps only what double opt-in needs as
+			// evidence (confirmed_at, source) and deliberately NOT the
+			// signup IP. confirm_token_hash is a sha256 of a single-use
+			// random token; unsubscribe_token is stored raw because it has
+			// to be re-embedded in every later email and can only ever
+			// unsubscribe, never act on an account.
+			statements := []struct {
+				name string
+				ddl  string
+			}{
+				{"newsletter_subscribers", `CREATE TABLE newsletter_subscribers (
+					id TEXT PRIMARY KEY,
+					email TEXT UNIQUE NOT NULL,
+					status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'unsubscribed')),
+					confirm_token_hash TEXT,
+					confirm_expires_at DATETIME,
+					unsubscribe_token TEXT UNIQUE NOT NULL,
+					source TEXT,
+					confirmation_sent_at DATETIME,
+					confirmed_at DATETIME,
+					unsubscribed_at DATETIME,
+					created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+					updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+				)`},
+				{"idx_newsletter_confirm_token", `CREATE INDEX idx_newsletter_confirm_token ON newsletter_subscribers(confirm_token_hash)`},
+				{"contact_messages", `CREATE TABLE contact_messages (
+					id TEXT PRIMARY KEY,
+					name TEXT NOT NULL,
+					email TEXT NOT NULL,
+					message TEXT NOT NULL,
+					status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new', 'read', 'archived')),
+					created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+				)`},
+				{"idx_contact_messages_email", `CREATE INDEX idx_contact_messages_email ON contact_messages(email, created_at)`},
+				// message_id is the provider's own id for the message and is
+				// UNIQUE so a retried webhook delivery is idempotent. NULLs
+				// are distinct in both SQLite and Postgres, so providers
+				// that send no id simply are not de-duplicated.
+				{"inbound_emails", `CREATE TABLE inbound_emails (
+					id TEXT PRIMARY KEY,
+					message_id TEXT UNIQUE,
+					from_email TEXT NOT NULL,
+					from_name TEXT,
+					to_email TEXT NOT NULL,
+					subject TEXT,
+					text_body TEXT,
+					html_body TEXT,
+					received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+				)`},
+			}
+			for _, s := range statements {
+				ddl := s.ddl
+				if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+					ddl = pgSchema(ddl)
+				}
+				if _, err := tx.Exec(ddl); err != nil {
+					return fmt.Errorf("failed to create %s: %w", s.name, err)
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

@@ -192,15 +192,17 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
   const activeToken = token;
   const isAdmin = projectDetails?.user_role === 'ADMIN';
 
-  // Sync state if project details loaded after mount
-  useEffect(() => {
+  // Re-seed the form if project details load or refresh after mount. Adjusted
+  // during render (keyed on the details object) instead of in an effect.
+  const [seenProjectDetails, setSeenProjectDetails] = useState(projectDetails);
+  if (projectDetails !== seenProjectDetails) {
+    setSeenProjectDetails(projectDetails);
     if (projectDetails) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setName(projectDetails.name || '');
       setDescription(projectDetails.description || '');
       setVisibility(projectDetails.visibility || 'PRIVATE');
     }
-  }, [projectDetails]);
+  }
 
   // Fetch project members on load or tab switch to members
   useEffect(() => {

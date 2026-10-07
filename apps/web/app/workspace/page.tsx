@@ -355,9 +355,16 @@ const LiveCodePreview: React.FC<LiveCodePreviewProps> = ({ selectedNode, nodes, 
     [selectedNode, nodes, edges]
   );
 
-  // Reset to first tab when node changes
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  React.useEffect(() => { setActiveFile(0); setOverviewFile(null); }, [selectedNode?.id]);
+  // Reset to first tab when node changes. Adjusted during render rather than in
+  // an effect so the stale tab never paints; expandedSections is deliberately
+  // left alone (a `key` remount would reset it too).
+  const selectedNodeId = selectedNode?.id;
+  const [seenNodeId, setSeenNodeId] = useState(selectedNodeId);
+  if (selectedNodeId !== seenNodeId) {
+    setSeenNodeId(selectedNodeId);
+    setActiveFile(0);
+    setOverviewFile(null);
+  }
 
   const allFiles = useMemo(() => generateBundleFiles(nodes, edges), [nodes, edges]);
 

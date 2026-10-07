@@ -19,6 +19,7 @@ import type { ActivityEvent, Project, RunRow, Team } from '../lib/types';
 import { useAggregatedRuns } from '../lib/useAggregatedRuns';
 import { useAnyActiveAgent } from '../lib/useAnyActiveAgent';
 import { useActivity } from '../lib/useActivity';
+import { useAbortableEffect, isAbortError } from '../lib/useAbortableEffect';
 import '../components/ui/blueprint.css';
 import './dashboard.css';
 
@@ -221,14 +222,18 @@ function DashboardContent() {
     }
   }, [hasHydrated, token, router]);
 
-  // Auto-open the create-workspace prompt when arriving via ?create=1
+  // Auto-open the create-workspace prompt when arriving via ?create=1. The
+  // modal opens during render (when the param flips on) and the effect only
+  // strips the param from the URL so a refresh doesn't reopen it.
+  const wantsCreate = searchParams.get('create') === '1';
+  const [seenWantsCreate, setSeenWantsCreate] = useState(false);
+  if (wantsCreate !== seenWantsCreate) {
+    setSeenWantsCreate(wantsCreate);
+    if (wantsCreate) setIsCreateModalOpen(true);
+  }
   useEffect(() => {
-    if (searchParams.get('create') === '1') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setIsCreateModalOpen(true);
-      router.replace('/dashboard');
-    }
-  }, [searchParams, router]);
+    if (wantsCreate) router.replace('/dashboard');
+  }, [wantsCreate, router]);
 
   // Global command palette shortcut (product-memory 08.5 item A8) — Cmd/Ctrl+K
   // from anywhere on the page, matching the convention this shortcut carries
@@ -245,7 +250,7 @@ function DashboardContent() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (signal: AbortSignal = new AbortController().signal) => {
     const activeToken = token;
     if (!activeToken) return;
 
@@ -253,6 +258,7 @@ function DashboardContent() {
     try {
       const teamsRes = await fetch(`${API_URL}/api/teams`, {
         headers: { Authorization: `Bearer ${activeToken}` },
+        signal,
       });
       if (teamsRes.ok) {
         const fetchedTeams: Team[] = await teamsRes.json();
@@ -262,6 +268,7 @@ function DashboardContent() {
 
       const projectsRes = await fetch(`${API_URL}/api/projects`, {
         headers: { Authorization: `Bearer ${activeToken}` },
+        signal,
       });
       if (projectsRes.ok) {
         const fetchedProjects: Project[] = (await projectsRes.json()) || [];
@@ -272,6 +279,7 @@ function DashboardContent() {
           if (p && p.user_role === 'ADMIN') {
             const reqsRes = await fetch(`${API_URL}/api/projects/${p.id}/join-requests`, {
               headers: { Authorization: `Bearer ${activeToken}` },
+              signal,
             });
             if (reqsRes.ok) {
               const reqs: JoinRequest[] = await reqsRes.json();
@@ -287,16 +295,15 @@ function DashboardContent() {
         setJoinRequests(requestsAccumulator);
       }
     } catch (err) {
-      console.error('Error fetching dashboard data', err);
+      if (!isAbortError(err)) console.error('Error fetching dashboard data', err);
     } finally {
-      setIsLoadingData(false);
+      if (!signal.aborted) setIsLoadingData(false);
     }
   }, [token]);
 
-  useEffect(() => {
+  useAbortableEffect((signal) => {
     if (user) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      fetchData();
+      fetchData(signal);
     }
   }, [user, fetchData]);
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useMemo, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@iconify/react';
@@ -14,6 +14,7 @@ import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
 import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, ShieldIcon, BookIcon } from '../dashboard/NavIcons';
 import { BrandLogo } from '../components/brand/BrandLogo';
 import type { Project } from '../lib/types';
+import { useAbortableEffect, isAbortError } from '../lib/useAbortableEffect';
 import '../components/ui/blueprint.css';
 import './projects.css';
 
@@ -97,12 +98,12 @@ export default function ProjectsPageV2() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'danger'>('general');
   const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
 
-  const loadProjects = useCallback(async () => {
+  const loadProjects = useCallback(async (signal: AbortSignal = new AbortController().signal) => {
     if (!token) return;
     setIsLoading(true);
     setLoadError(null);
     try {
-      const res = await fetch(`${API_URL}/api/projects${showArchived ? '?archived=1' : ''}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_URL}/api/projects${showArchived ? '?archived=1' : ''}`, { headers: { Authorization: `Bearer ${token}` }, signal });
       if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
       const data: Project[] = await res.json();
       setProjects(data);
@@ -115,7 +116,7 @@ export default function ProjectsPageV2() {
       await Promise.all(
         data.map(async (p) => {
           try {
-            const runsRes = await fetch(`${API_URL}/api/projects/${p.id}/runs`, { headers: { Authorization: `Bearer ${token}` } });
+            const runsRes = await fetch(`${API_URL}/api/projects/${p.id}/runs`, { headers: { Authorization: `Bearer ${token}` }, signal });
             if (!runsRes.ok) return;
             const runs: { status: string; updatedAt: string }[] = await runsRes.json();
             if (runs.length === 0) {
@@ -130,19 +131,20 @@ export default function ProjectsPageV2() {
           }
         })
       );
-      setRunSummaries(summaries);
+      if (!signal.aborted) setRunSummaries(summaries);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to load projects.';
-      setLoadError(msg.includes('fetch') ? 'Cannot connect to the backend server. Please try again shortly.' : msg);
+      if (!isAbortError(err)) {
+        const msg = err instanceof Error ? err.message : 'Failed to load projects.';
+        setLoadError(msg.includes('fetch') ? 'Cannot connect to the backend server. Please try again shortly.' : msg);
+      }
     } finally {
-      setIsLoading(false);
+      if (!signal.aborted) setIsLoading(false);
     }
   }, [token, showArchived]);
 
-  useEffect(() => {
+  useAbortableEffect((signal) => {
     // Fetching on mount/dependency change is the intended synchronization with the projects API.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadProjects();
+    loadProjects(signal);
   }, [loadProjects]);
 
   const handleDuplicate = async (projectId: string) => {

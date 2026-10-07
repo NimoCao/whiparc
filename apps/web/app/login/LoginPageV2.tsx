@@ -38,12 +38,10 @@ export function LoginPageV2() {
   const { login, signup, isLoading, error, clearError } = useAuthStore();
 
   const [theme, setTheme] = useState<Theme>('dark');
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(() => searchParams.get('email') ?? '');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
 
   // The sign-in/sign-up mode toggle below navigates via a plain router.push
   // of a hardcoded '/login' or '/login?mode=signup' — without this, that
@@ -55,29 +53,32 @@ export function LoginPageV2() {
     return `${path}${path.includes('?') ? '&' : '?'}redirect=${encodeURIComponent(redirect)}`;
   };
 
-  useEffect(() => {
-    const mode = searchParams.get('mode');
-    if (mode === 'signup') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setIsSignUp(true);
-    } else {
-      setIsSignUp(false);
-    }
-    clearError();
-    setFormError(null);
+  // Both are plain functions of the URL, so they are derived on render rather
+  // than mirrored into state by an effect.
+  const isSignUp = searchParams.get('mode') === 'signup';
+  // Informational (non-error) notice passed via redirect, e.g. after a signup
+  // attempt on an already-registered email bounces here.
+  const notice =
+    searchParams.get('notice') === 'exists'
+      ? 'You already have an account with this email — sign in below.'
+      : null;
 
-    // Informational (non-error) notices passed via redirect, e.g. after a
-    // signup attempt on an already-registered email bounces here.
-    const noticeParam = searchParams.get('notice');
-    if (noticeParam === 'exists') {
-      setNotice('You already have an account with this email — sign in below.');
-    } else {
-      setNotice(null);
-    }
-    // Any flow that already knows the address (an invite link, the
-    // already-registered bounce above) can prefill it.
+  // Navigating between login/signup (or arriving with a new email/notice) is a
+  // fresh start for the form: drop the previous attempt's error and let any
+  // flow that already knows the address (an invite link, the already-registered
+  // bounce above) prefill it. Adjusted during render, keyed on the query string
+  // — https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const paramsKey = searchParams.toString();
+  const [seenParamsKey, setSeenParamsKey] = useState(paramsKey);
+  if (paramsKey !== seenParamsKey) {
+    setSeenParamsKey(paramsKey);
+    setFormError(null);
     const prefillEmail = searchParams.get('email');
     if (prefillEmail) setEmail(prefillEmail);
+  }
+
+  useEffect(() => {
+    clearError();
   }, [searchParams, clearError]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -226,7 +227,7 @@ export function LoginPageV2() {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Priya Raghavan"
+                  placeholder="Richard Henricks"
                   className="wp-login-input"
                   style={inputStyle}
                 />

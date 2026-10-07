@@ -5,9 +5,11 @@
 ; current user's PATH (registry + a WM_SETTINGCHANGE broadcast so newly
 ; opened terminals pick it up immediately, no logoff/reboot needed).
 ;
-; Build (from the repo root, with the target binary already built as
-; whiparc-windows-amd64.exe next to this script or passed via /DSOURCE_BINARY):
-;   makensis /DVERSION=1.2.3 /DSOURCE_BINARY=..\..\whiparc-windows-amd64.exe installers\windows\whiparc.nsi
+; Build (with the target binary already built as whiparc-windows-amd64.exe
+; next to this script or passed via /DSOURCE_BINARY). Pass ABSOLUTE paths for
+; both /DSOURCE_BINARY and this script — the icon/bitmap lookups below use
+; ${__FILEDIR__}, which breaks if makensis is given a relative script path:
+;   makensis /DVERSION=1.2.3 /DVERSION_NUMERIC=1.2.3.0 /DSOURCE_BINARY=C:\src\whiparc\whiparc-windows-amd64.exe C:\src\whiparc\installers\windows\whiparc.nsi
 ;
 ; Produces whiparc-setup-windows-amd64.exe in the current directory.
 
@@ -15,6 +17,12 @@ Unicode true
 
 !ifndef VERSION
   !define VERSION "0.0.0-dev"
+!endif
+!ifndef VERSION_NUMERIC
+  ; VIProductVersion must be a strict X.X.X.X number — semver prerelease
+  ; suffixes ("1.2.3-beta.1") are rejected, so CI passes the numeric core
+  ; separately via /DVERSION_NUMERIC.
+  !define VERSION_NUMERIC "0.0.0.0"
 !endif
 !ifndef SOURCE_BINARY
   !define SOURCE_BINARY "whiparc-windows-amd64.exe"
@@ -43,10 +51,23 @@ ShowUninstDetails show
 !define MUI_ABORTWARNING
 ; Brand assets live next to this script (${__FILEDIR__} keeps the build working
 ; no matter which directory makensis is invoked from).
-!define MUI_ICON "${__FILEDIR__}\whiparc.ico"
-!define MUI_UNICON "${__FILEDIR__}\whiparc.ico"
-!define MUI_WELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}\welcome.bmp"
-!define MUI_UNWELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}\welcome.bmp"
+;
+; This script is compiled on both Windows (build-local.ps1) and Linux (CI),
+; and no single path separator works on both: MUI embeds the welcome bitmap
+; with NSIS's `File` instruction, which on Windows rejects "/" ("no files
+; found"), while on Linux "\" is an ordinary filename character, so
+; "...\whiparc.ico" is looked up as a file literally named "\whiparc.ico".
+; NSIS_WIN32_MAKENSIS is defined only by the Windows build of makensis, so use
+; it to pick the separator the host's makensis expects.
+!ifdef NSIS_WIN32_MAKENSIS
+  !define SEP "\"
+!else
+  !define SEP "/"
+!endif
+!define MUI_ICON "${__FILEDIR__}${SEP}whiparc.ico"
+!define MUI_UNICON "${__FILEDIR__}${SEP}whiparc.ico"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}${SEP}welcome.bmp"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}${SEP}welcome.bmp"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -61,12 +82,13 @@ ShowUninstDetails show
 
 !insertmacro MUI_LANGUAGE "English"
 
-VIProductVersion "0.0.0.0"
+VIProductVersion "${VERSION_NUMERIC}"
 VIAddVersionKey "ProductName" "${APP_NAME} CLI"
 VIAddVersionKey "FileDescription" "${APP_NAME} CLI installer"
 VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "FileVersion" "${VERSION}"
-VIAddVersionKey "LegalCopyright" "Whiparc"
+VIAddVersionKey "CompanyName" "Whiparc"
+VIAddVersionKey "LegalCopyright" "Copyright (c) 2026 Whiparc"
 
 ; ---------------------------------------------------------------------------
 ; StrStr: classic public-domain NSIS substring-search recipe. Used so the
