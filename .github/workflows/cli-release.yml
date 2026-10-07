@@ -160,11 +160,16 @@ jobs:
         run: |
           mkdir -p dist
           chmod +x artifacts/whiparc-windows-amd64.exe
+          # The script path must be absolute: whiparc.nsi locates its icon and
+          # bitmap via ${__FILEDIR__}, which is only a usable path when makensis
+          # was given an absolute one — a relative script path makes makensis
+          # resolve "installers/windows/..." a second time from the script's own
+          # directory and fail to open whiparc.ico.
           makensis \
             "-DVERSION=${{ needs.prepare.outputs.version }}" \
             "-DVERSION_NUMERIC=${{ needs.prepare.outputs.version_numeric }}" \
             "-DSOURCE_BINARY=$(pwd)/artifacts/whiparc-windows-amd64.exe" \
-            installers/windows/whiparc.nsi
+            "$(pwd)/installers/windows/whiparc.nsi"
           # NSIS writes OutFile relative to the .nsi script's own directory,
           # not this step's cwd — move it into dist/ alongside the Linux
           # packages so every installer this job produces lives in one flat
