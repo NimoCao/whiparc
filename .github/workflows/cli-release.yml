@@ -22,6 +22,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       version_numeric: ${{ steps.version.outputs.version_numeric }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
       gateway_url_default: ${{ steps.version.outputs.gateway_url_default }}
       api_url_default: ${{ steps.version.outputs.api_url_default }}
     steps:
@@ -45,6 +46,13 @@ jobs:
           VERSION="$(grep '^version=' "$GITHUB_OUTPUT" | cut -d= -f2)"
           CORE="${VERSION%%[-+]*}"
           echo "version_numeric=${CORE}.0" >> "$GITHUB_OUTPUT"
+          # Semver prerelease marker, computed on the version with the "cli-v"
+          # prefix already stripped — the tag name itself always contains a "-"
+          # ("cli-v1.2.3"), so testing the raw tag can never tell stable from beta.
+          case "$VERSION" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
   build:
     name: Build CLI for ${{ matrix.goos }}/${{ matrix.goarch }}
@@ -374,11 +382,13 @@ jobs:
 
   winget:
     name: Submit to winget
-    # Stable tags only: a '-' in the version marks a prerelease (see the
-    # release job), and winget-pkgs should only ever carry stable builds.
+    # Stable tags only: a '-' in the version (after the "cli-v" prefix) marks a
+    # prerelease, and winget-pkgs should only ever carry stable builds. The
+    # check uses prepare's `prerelease` output because the raw tag name always
+    # contains a '-' ("cli-v1.2.3"), which made a contains() test never match.
     # Runs after `release` so the installer URL it points at already exists.
-    if: startsWith(github.ref, 'refs/tags/cli-v') && !contains(github.ref_name, '-')
-    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/cli-v') && needs.prepare.outputs.prerelease == 'false'
+    needs: [prepare, release]
     runs-on: windows-latest
     env:
       WINGET_ENABLED: ${{ secrets.WINGET_TOKEN != '' }}

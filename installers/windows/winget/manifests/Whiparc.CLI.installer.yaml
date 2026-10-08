@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 PackageIdentifier: Whiparc.CLI
-PackageVersion: 0.1.1
+PackageVersion: 0.1.12
 InstallerType: nullsoft
 Scope: user
 InstallModes:
@@ -15,8 +15,8 @@ Commands:
   - whiparc
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/whiparc/whiparc/releases/download/cli-v0.1.1/whiparc-setup-windows-amd64.exe
-    InstallerSha256: 4264F26B9D43BC8B332D144BB77294A05F268A384805613F39B7AAFEF7098B45
+    InstallerUrl: https://github.com/whiparc/whiparc/releases/download/cli-v0.1.12/whiparc-setup-windows-amd64.exe
+    InstallerSha256: 676E89DFE699CEE73B967A7EE9AAEAC40AA3534BC81929A47E4CB5B8E25979D4
     # Matches the per-user uninstall key written by installers/windows/whiparc.nsi
     # (HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Whiparc), which is
     # how winget recognises an already-installed copy for upgrades and removal.
