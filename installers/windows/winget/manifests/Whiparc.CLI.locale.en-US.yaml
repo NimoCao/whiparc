@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
 PackageIdentifier: Whiparc.CLI
-PackageVersion: 0.1.1
+PackageVersion: 0.1.12
 PackageLocale: en-US
 Publisher: Whiparc
 PublisherUrl: https://whiparc.com
