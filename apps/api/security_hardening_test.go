@@ -122,10 +122,10 @@ func TestValidatePassword(t *testing.T) {
 		name_    string
 		wantErr  string // substring; "" means must be accepted
 	}{
-		{"single character (the #115 PoC)", "a", "", "", "at least 10"},
-		{"nine characters", "abcdefgh9", "", "", "at least 10"},
-		{"empty", "", "", "", "at least 10"},
-		{"exactly ten", "tr0ub4dor&", "", "", ""},
+		{"single character (the #115 PoC)", "a", "", "", "at least 8"},
+		{"seven characters", "abcdef9", "", "", "at least 8"},
+		{"empty", "", "", "", "at least 8"},
+		{"exactly eight", "tr0ub4d&", "", "", ""},
 		{"passphrase", "correct horse battery staple", "", "", ""},
 		{"multibyte counted in characters", "пароль-пароль", "", "", ""},
 		{"too many bytes for bcrypt", tooLong, "", "", "at most 72"},

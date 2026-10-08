@@ -150,8 +150,8 @@ function ResetPasswordContent() {
 
     // Mirrors the API's password policy (apps/api/password_policy.go), which
     // is the authority — this just avoids a round trip for the obvious case.
-    if (Array.from(password).length < 10) {
-      setError('Password must be at least 10 characters.');
+    if (Array.from(password).length < 8) {
+      setError('Password must be at least 8 characters.');
       return;
     }
     if (password !== confirm) {
@@ -249,8 +249,8 @@ function ResetPasswordContent() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="At least 10 characters"
-            minLength={10}
+            placeholder="At least 8 characters"
+            minLength={8}
             autoComplete="new-password"
             className="wp-login-input"
             style={inputStyle}

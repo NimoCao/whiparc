@@ -1,0 +1,9 @@
+{
+  "name": "api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Go API. Not a JavaScript package: this file exists only so the root `npm run dev` (Turborepo) can start it alongside apps/web.",
+  "scripts": {
+    "dev": "go run ."
+  }
+}

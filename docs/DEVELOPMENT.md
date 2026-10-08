@@ -83,6 +83,17 @@ This uses Turborepo to run:
 - Next.js frontend at `http://localhost:3000`
 - Go API backend at `http://localhost:8080`
 
+Turborepo only runs npm workspace packages. `apps/api` is a Go module, not a
+JavaScript package, so it has a stub `apps/api/package.json` whose only job is
+a `dev` script (`go run .`) that lets this one command start it alongside the
+web app. Go must be installed (see Prerequisites). Environment variables you
+export in the shell reach both
+processes; the API does not read `.env` itself.
+
+Both servers run in one terminal and share Ctrl+C. If you only want one of
+them, run it directly: `npm run dev --workspace=web` or
+`npm run dev --workspace=api`.
+
 ## Running the Backend Server Separately
 
 If you are focusing on backend development or debugging the Go runner, you
@@ -98,9 +109,10 @@ can run the API server independently:
    cd apps/api
    ```
 
-3. Run the Go server:
+3. Run the Go server (the package spans several files, so run `.`, not
+   `main.go`):
    ```bash
-   go run main.go
+   go run .
    ```
 
 By default:

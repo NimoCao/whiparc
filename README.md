@@ -130,7 +130,8 @@ npm run dev
 ```
 
 This starts the Next.js frontend at `http://localhost:3000` and the Go API
-at `http://localhost:8080`.
+at `http://localhost:8080` in one terminal. The first load of the frontend
+compiles on demand and can take a minute.
 
 For OAuth setup, running services independently, or running everything in
 Docker, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
@@ -157,6 +158,10 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev
 setup, branch/PR conventions, and how the license split affects where a
 CLA is required. Participation is governed by the
 [Code of Conduct](CODE_OF_CONDUCT.md).
+
+The default branch is `dev` (the integration branch; open PRs against it).
+`main` is the released, deployed branch, so a fresh clone may be slightly
+ahead of what is live at whiparc.com.
 
 ## Security
 

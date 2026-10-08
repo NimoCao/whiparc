@@ -9,7 +9,7 @@ import (
 const (
 	// minPasswordLength is counted in characters (runes), not bytes, so a
 	// passphrase in any script isn't penalised for its UTF-8 width.
-	minPasswordLength = 10
+	minPasswordLength = 8
 
 	// maxPasswordBytes is bcrypt's hard input limit. golang.org/x/crypto/bcrypt
 	// rejects longer input outright (older versions silently truncated it), so
@@ -25,6 +25,14 @@ const (
 // lookup — it only closes the "password123" class of trivially guessable
 // choices that pass a bare length check.
 var commonPasswords = map[string]struct{}{
+	"password": {}, "password1": {}, "password!": {}, "passw0rd1": {}, "p@ssw0rd": {},
+	"p@ssword": {}, "pa$$w0rd": {}, "12345678": {}, "123456789": {}, "87654321": {},
+	"11111111": {}, "00000000": {}, "12341234": {}, "qwertyui": {}, "qwerty123": {},
+	"qwerty12": {}, "asdfghjk": {}, "asdf1234": {}, "zxcvbnm1": {}, "1q2w3e4r": {},
+	"1qaz2wsx": {}, "abc12345": {}, "abcd1234": {}, "abcdefgh": {}, "iloveyou": {},
+	"iloveyou1": {}, "letmein1": {}, "letmein12": {}, "welcome1": {}, "welcome12": {},
+	"admin123": {}, "admin1234": {}, "changeme": {}, "whiparc1": {}, "whiparc12": {},
+	"monkey123": {}, "dragon123": {}, "football1": {}, "baseball1": {}, "sunshine1": {},
 	"1234567890": {}, "0123456789": {}, "12345678910": {}, "123456789012": {},
 	"1q2w3e4r5t": {}, "1q2w3e4r5t6y": {}, "1qaz2wsx3edc": {}, "qazwsxedc123": {},
 	"qwertyuiop": {}, "qwertyuiop123": {}, "asdfghjkl1": {}, "asdfghjklqwerty": {},

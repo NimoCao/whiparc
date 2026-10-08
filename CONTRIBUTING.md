@@ -27,8 +27,12 @@ containers, OAuth app registration, running each service independently).
 
 ## Branching and PRs
 
-- `main` is the release branch — protected, always deployable.
-- `dev` is the integration branch — PR your feature/fix branches here.
+- `main` is the release branch — protected, always deployable. What runs on
+  whiparc.com is cut from `main`.
+- `dev` is the integration branch and this repository's default branch, so a
+  plain `git clone` checks out `dev`, which can be ahead of what is deployed.
+  Branch from `dev` and PR your feature/fix branches back into `dev`. Use
+  `git checkout main` if you want to see what is currently released.
 - Branch naming: `feature/<short-description>`, `fix/<short-description>`,
   `docs/<short-description>` (not enforced by tooling, just a convention).
 - Keep PRs scoped to one change. Large, multi-purpose PRs are harder to
