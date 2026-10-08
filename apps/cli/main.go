@@ -422,6 +422,69 @@ func runProjectsDelete(cmd *cobra.Command, args []string) {
 	printSuccess("Project deleted successfully.")
 }
 
+// skippedImportDirs are directory names that collectIaCFiles never descends
+// into. Pointing `import --dir` at a repository root otherwise uploads
+// vendored module copies (.terraform/modules), git internals (.git), install
+// trees (node_modules) and CI workflow files (.github), which can be
+// thousands of files and shows up as confusing nodes on the canvas.
+var skippedImportDirs = map[string]bool{
+	".git":         true,
+	".terraform":   true,
+	"node_modules": true,
+	".github":      true,
+}
+
+// collectIaCFiles walks dir and returns every .tf/.yml/.yaml file below it,
+// skipping the directories in skippedImportDirs.
+//
+// Each returned FileItem.Name is the file's path relative to dir rather than
+// its bare base name: a plain Base() makes two files with the same name in
+// different folders collide in the upload payload.
+func collectIaCFiles(dir string) ([]FileItem, error) {
+	var files []FileItem
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			if skippedImportDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".tf", ".yml", ".yaml":
+		default:
+			return nil
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			rel = filepath.Base(path)
+		}
+
+		files = append(files, FileItem{
+			Name:    filepath.ToSlash(rel),
+			Content: string(data),
+		})
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
 func runImport(cmd *cobra.Command, args []string) {
 	projectID, _ := cmd.Flags().GetString("project")
 	filePath, _ := cmd.Flags().GetString("file")
@@ -450,28 +513,12 @@ func runImport(cmd *cobra.Command, args []string) {
 			Content: string(data),
 		})
 	} else {
-		err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if !info.IsDir() {
-				ext := strings.ToLower(filepath.Ext(path))
-				if ext == ".tf" || ext == ".yml" || ext == ".yaml" {
-					data, err := os.ReadFile(path)
-					if err == nil {
-						files = append(files, FileItem{
-							Name:    filepath.Base(path),
-							Content: string(data),
-						})
-					}
-				}
-			}
-			return nil
-		})
+		collected, err := collectIaCFiles(dirPath)
 		if err != nil {
 			printError("Failed to walk directory: %v", err)
 			return
 		}
+		files = collected
 	}
 
 	if len(files) == 0 {
