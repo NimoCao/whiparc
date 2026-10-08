@@ -144,8 +144,8 @@ func handleResetPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid payload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if len(payload.Password) < 8 {
-		http.Error(w, "Password must be at least 8 characters", http.StatusBadRequest)
+	if err := validatePassword(payload.Password, "", ""); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

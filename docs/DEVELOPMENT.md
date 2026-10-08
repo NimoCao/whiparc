@@ -148,6 +148,23 @@ file alongside this compose file only if you deliberately want to point at
 something else instead (a real scratch Supabase project, say) — see
 `.env.example`.
 
+Because this stack runs on Postgres, the API treats it as a hosted
+deployment and **refuses to start** unless `JWT_SECRET` and `FRONTEND_URL`
+are set to real values (see `apps/api/config_check.go`) — otherwise it would
+sign sessions with the development key from the public source tree and accept
+any CORS/WebSocket origin. Put both in the `.env` file next to the compose
+file (`openssl rand -base64 32` for the secret; `http://localhost:3000` is a
+fine `FRONTEND_URL` locally). For a purely throwaway run you can instead set
+`WHIPARC_ALLOW_INSECURE_DEV=true` in that `.env`; the API logs a warning and
+skips the check. Never set it on a real deployment.
+
+Per-IP rate limits (signup, login, forgot-password) key on the client IP, and
+only believe `X-Forwarded-For` / `X-Real-IP` when the direct peer is a
+trusted proxy. By default loopback and private ranges are trusted (the Caddy
+reverse proxy in `deploy/Caddyfile` reaches the container over Docker's
+private bridge); set `TRUSTED_PROXY_CIDRS` to a comma-separated CIDR list to
+narrow that, or to `none` when the API is exposed with no proxy in front.
+
 On first run, the bundled `postgres` service's `initdb` can appear to hang
 at "performing post-bootstrap initialization" for several minutes with
 near-zero CPU — a known Windows/Docker Desktop quirk, not a real problem.

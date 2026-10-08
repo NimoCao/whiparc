@@ -181,6 +181,17 @@ func main() {
 		dbBackend = "sqlite"
 	}
 
+	if err := validateProductionConfig(dbBackend, os.Getenv); err != nil {
+		log.Fatalf("[CONFIG] %v\n", err)
+	}
+	if dbBackend == "postgres" {
+		if strings.EqualFold(strings.TrimSpace(os.Getenv(insecureDevOverrideEnv)), "true") {
+			log.Printf("[CONFIG] WARNING: %s=true — production config checks are SKIPPED. Never use this on a real deployment.\n", insecureDevOverrideEnv)
+		} else {
+			log.Printf("[CONFIG] Production config checks passed (JWT_SECRET set, FRONTEND_URL=%s)\n", allowedOrigin())
+		}
+	}
+
 	var rawDB *sql.DB
 	var err error
 
@@ -1375,7 +1386,7 @@ func init() {
 	keyStr := os.Getenv("JWT_SECRET")
 	if keyStr == "" {
 		log.Println("[AUTH] WARNING: JWT_SECRET is not set — falling back to the built-in development key. Set a real random secret before exposing this API publicly.")
-		keyStr = "whiparc_workspace_orchestration_secret_key_98765!"
+		keyStr = devJWTSecret
 	}
 	jwtSecret = []byte(keyStr)
 }
@@ -1504,6 +1515,11 @@ func handleSignup(w http.ResponseWriter, r *http.Request) {
 
 	// Validate email structure and reject disposable/burner domains
 	if err := ValidateEmail(email); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := validatePassword(payload.Password, email, name); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
