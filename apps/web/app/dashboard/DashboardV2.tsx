@@ -9,12 +9,14 @@ import { ProjectSettingsModal } from '../components/ProjectSettingsModal';
 import { PublishTemplateModal } from '../components/PublishTemplateModal';
 import { CommandPalette } from '../components/CommandPalette';
 import { TeamSwitcher } from '../components/TeamSwitcher';
+import { ProductTour } from '../components/ProductTour';
 import EmailVerificationBanner from '../components/EmailVerificationBanner';
 import { BlueprintCorners } from '../components/ui/BlueprintCorners';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
 import { GridIcon, FolderIcon, LayoutIcon, ActivityIcon, LockIcon, UsersIcon, ShieldIcon, BookIcon } from './NavIcons';
 import { BrandLogo } from '../components/brand/BrandLogo';
+import { getDashboardTourSteps } from './dashboardTour';
 import type { ActivityEvent, Project, RunRow, Team } from '../lib/types';
 import { useAggregatedRuns } from '../lib/useAggregatedRuns';
 import { useAnyActiveAgent } from '../lib/useAnyActiveAgent';
@@ -170,7 +172,7 @@ function formatActivityEvent(event: ActivityEvent, currentUserId: string): strin
 function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { token, user, hasHydrated, logout, dismissOnboarding } = useAuthStore();
+  const { token, user, hasHydrated, logout, dismissOnboarding, completeTour } = useAuthStore();
 
   const [theme, setTheme] = useState<Theme>('dark');
   const [projects, setProjects] = useState<Project[]>([]);
@@ -419,6 +421,22 @@ function DashboardContent() {
   const { hasActiveAgent } = useAnyActiveAgent(token, projects);
   const { events: activityEvents, isLoading: isLoadingActivity } = useActivity(token, 10);
 
+  // Guided tour. Starts by itself once for an account that has not finished
+  // it (`tour_completed === false`; undefined while the profile is still
+  // loading, which deliberately does not count), after the dashboard has
+  // loaded so every spotlight target is on screen. Once running it stays
+  // mounted even if a background refetch flips `isLoadingData` again. The
+  // header "?" button replays it without touching the saved flag.
+  const needsTour = user?.tour_completed === false;
+  const [tourState, setTourState] = useState<'idle' | 'running' | 'closed'>('idle');
+  if (tourState === 'idle' && needsTour && !isLoadingData && !isCreateModalOpen) setTourState('running');
+  const firstName = user?.name?.split(' ')[0] ?? '';
+  const tourSteps = useMemo(() => getDashboardTourSteps(firstName), [firstName]);
+  const handleTourClose = useCallback(() => {
+    setTourState('closed');
+    if (needsTour) void completeTour();
+  }, [needsTour, completeTour]);
+
   if (!user) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#101114', color: '#A3A6AF' }}>
@@ -456,7 +474,7 @@ function DashboardContent() {
           <BrandLogo size={24} />
         </div>
 
-        <nav style={{ padding: '14px 10px', display: 'grid', gap: 2 }}>
+        <nav data-tour="nav" style={{ padding: '14px 10px', display: 'grid', gap: 2 }}>
           {NAV_ITEMS.map((item) => {
             const active = item.key === 'overview';
             const content = (
@@ -513,14 +531,16 @@ function DashboardContent() {
 
       <main style={{ flex: 1, minWidth: 0 }}>
         <header style={{ height: 56, display: 'flex', alignItems: 'center', gap: 14, padding: '0 clamp(16px,2.5vw,28px)', borderBottom: '1px solid var(--line)', background: 'var(--ground)', position: 'sticky', top: 0, zIndex: 20 }}>
-          <TeamSwitcher
-            teams={teams}
-            currentTeamId={activeTeam?.id ?? null}
-            onSelectTeam={selectTeam}
-            onTeamCreated={(team) => setTeams((prev) => [...prev, team])}
-            token={token || ''}
-          />
-          <div style={{ flex: 1, maxWidth: 340, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', height: 32, border: '1px solid var(--line)', background: 'transparent' }}>
+          <div data-tour="team">
+            <TeamSwitcher
+              teams={teams}
+              currentTeamId={activeTeam?.id ?? null}
+              onSelectTeam={selectTeam}
+              onTeamCreated={(team) => setTeams((prev) => [...prev, team])}
+              token={token || ''}
+            />
+          </div>
+          <div data-tour="search" style={{ flex: 1, maxWidth: 340, display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', height: 32, border: '1px solid var(--line)', background: 'transparent' }}>
             <Icon icon="lucide:search" width={14} style={{ color: 'var(--ink3)', flexShrink: 0 }} />
             <input
               value={searchQuery}
@@ -539,17 +559,30 @@ function DashboardContent() {
             </button>
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div data-tour="tools" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+                title="Toggle theme"
+                className="wp-dash-iconbtn"
+                style={{ width: 32, height: 32, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink2)', cursor: 'pointer' }}
+              >
+                <Icon icon={theme === 'light' ? 'lucide:moon' : 'lucide:sun'} width={15} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTourState('running')}
+                title="Take the product tour"
+                aria-label="Take the product tour"
+                className="wp-dash-iconbtn"
+                style={{ width: 32, height: 32, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink2)', cursor: 'pointer' }}
+              >
+                <Icon icon="lucide:circle-help" width={15} />
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
-              title="Toggle theme"
-              className="wp-dash-iconbtn"
-              style={{ width: 32, height: 32, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink2)', cursor: 'pointer' }}
-            >
-              <Icon icon={theme === 'light' ? 'lucide:moon' : 'lucide:sun'} width={15} />
-            </button>
-            <button
-              type="button"
+              data-tour="new-project"
               onClick={() => setIsCreateModalOpen(true)}
               className="wp-dash-submit"
               style={{ position: 'relative', height: 32, padding: '0 14px', display: 'flex', alignItems: 'center', fontSize: 13.5, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: 'pointer' }}
@@ -573,7 +606,7 @@ function DashboardContent() {
           </div>
 
           {isFirstRun && (
-            <div className="wp-blueprint" style={{ position: 'relative', background: 'var(--panel)', padding: '22px 24px' }}>
+            <div data-tour="checklist" className="wp-blueprint" style={{ position: 'relative', background: 'var(--panel)', padding: '22px 24px' }}>
               <BlueprintCorners />
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
                 <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 20, color: 'var(--ink)' }}>Three steps to your first free deploy</h2>
@@ -613,7 +646,7 @@ function DashboardContent() {
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 14 }}>
+          <div data-tour="stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 14 }}>
             <div style={{ border: '1px solid var(--line)', padding: '14px 16px' }}>
               <p style={labelStyle}>Last deploy</p>
               <p style={{ margin: '6px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, lineHeight: 1, color: 'var(--ink)' }}>
@@ -660,7 +693,7 @@ function DashboardContent() {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2.1fr) minmax(250px,1fr)', gap: 'clamp(18px,2vw,24px)', alignItems: 'start' }}>
             <div style={{ display: 'grid', gap: 'clamp(18px,2vw,24px)', minWidth: 0 }}>
-              <section id="projects">
+              <section id="projects" data-tour="projects">
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 14, marginBottom: 12, flexWrap: 'wrap' }}>
                   <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 20, color: 'var(--ink)' }}>{view === 'mine' ? 'Your projects' : 'Discover projects'}</h2>
                   <button
@@ -783,7 +816,7 @@ function DashboardContent() {
                 )}
               </section>
 
-              <section>
+              <section data-tour="runs">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', marginBottom: 12 }}>
                   <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 20, color: 'var(--ink)' }}>Recent runs</h2>
                   <div style={{ display: 'flex', gap: 0, border: '1px solid var(--line)' }}>
@@ -1081,6 +1114,8 @@ function DashboardContent() {
           project={selectedProjectForPublish}
         />
       )}
+
+      {tourState === 'running' && <ProductTour steps={tourSteps} onClose={handleTourClose} />}
 
       {isPaletteOpen && <CommandPalette onClose={() => setIsPaletteOpen(false)} projects={projects} navItems={NAV_ITEMS} />}
     </div>

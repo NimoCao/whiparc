@@ -593,15 +593,19 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	name := user.Name
 	emailVerified := user.EmailVerified
 	var onboardingDismissedAt sql.NullTime
+	var tourCompletedAt sql.NullTime
 	var avatarURL sql.NullString
 	var pendingEmail sql.NullString
 
-	err := db.QueryRow("SELECT email, name, email_verified, onboarding_dismissed_at, avatar_url, pending_email FROM users WHERE id = ?", user.ID).
-		Scan(&email, &name, &emailVerified, &onboardingDismissedAt, &avatarURL, &pendingEmail)
+	err := db.QueryRow("SELECT email, name, email_verified, onboarding_dismissed_at, tour_completed_at, avatar_url, pending_email FROM users WHERE id = ?", user.ID).
+		Scan(&email, &name, &emailVerified, &onboardingDismissedAt, &tourCompletedAt, &avatarURL, &pendingEmail)
 	if err != nil && err != sql.ErrNoRows {
 		log.Printf("[AUTH] Warning: failed to query live user for me endpoint: %v\n", err)
 	}
 	onboardingDismissed := onboardingDismissedAt.Valid
+	// Fail closed: if the row could not be read, report the tour as already
+	// completed so a transient DB error never pops it up for a returning user.
+	tourCompleted := tourCompletedAt.Valid || err != nil
 	plan := bestPlanForUser(user.ID)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -612,6 +616,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 		"plan":                 plan,
 		"email_verified":       emailVerified,
 		"onboarding_dismissed": onboardingDismissed,
+		"tour_completed":       tourCompleted,
 		"avatar_url":           avatarURL.String,
 		"pending_email":        pendingEmail.String,
 		"user": map[string]interface{}{
@@ -621,6 +626,7 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 			"plan":                 plan,
 			"email_verified":       emailVerified,
 			"onboarding_dismissed": onboardingDismissed,
+			"tour_completed":       tourCompleted,
 			"avatar_url":           avatarURL.String,
 			"pending_email":        pendingEmail.String,
 		},
@@ -748,6 +754,28 @@ func handleDismissOnboarding(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"onboarding_dismissed": true})
+}
+
+// PATCH /api/auth/tour
+// Records that the caller finished or skipped the guided dashboard tour so it
+// is only auto-started once per account, across devices. One-way like the
+// onboarding dismissal above; the dashboard's "Take the tour" button replays
+// it client-side without touching this flag. COALESCE keeps the original
+// completion time if a second device reports the same thing later.
+func handleCompleteTour(w http.ResponseWriter, r *http.Request) {
+	user, ok := GetUserFromContext(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if _, err := db.Exec("UPDATE users SET tour_completed_at = COALESCE(tour_completed_at, datetime('now')) WHERE id = ?", user.ID); err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"tour_completed": true})
 }
 
 // CanvasState models & handlers

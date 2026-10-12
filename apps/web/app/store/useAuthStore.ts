@@ -8,6 +8,12 @@ interface User {
   plan: string;
   email_verified: boolean;
   onboarding_dismissed: boolean;
+  // Whether the guided dashboard tour was finished or skipped. Optional on
+  // purpose: the login/signup response and the JWT don't carry it, so it is
+  // `undefined` until the first fetchMe() lands, and the dashboard only
+  // auto-starts the tour on an explicit `false`. That keeps it from flashing
+  // up for a returning user during the window before the real value arrives.
+  tour_completed?: boolean;
   // Not carried in the JWT (unlike name) — starts empty until the first
   // fetchMe() refresh, same reasoning as onboarding_dismissed below.
   avatar_url: string;
@@ -34,6 +40,7 @@ interface AuthState {
   resendVerification: () => Promise<{ success: boolean; message?: string; error?: string }>;
   fetchMe: () => Promise<User | null>;
   dismissOnboarding: () => Promise<void>;
+  completeTour: () => Promise<void>;
   setSessionFromToken: (token: string) => boolean;
   logout: () => void;
   clearError: () => void;
@@ -248,6 +255,7 @@ export const useAuthStore = create<AuthState>()(
             plan: data.plan || data.user?.plan || 'FREE',
             email_verified: Boolean(data.email_verified ?? data.user?.email_verified),
             onboarding_dismissed: Boolean(data.onboarding_dismissed ?? data.user?.onboarding_dismissed),
+            tour_completed: Boolean(data.tour_completed ?? data.user?.tour_completed),
             avatar_url: data.avatar_url || data.user?.avatar_url || '',
             pending_email: data.pending_email || data.user?.pending_email || '',
           };
@@ -274,6 +282,23 @@ export const useAuthStore = create<AuthState>()(
           });
         } catch (err: unknown) {
           console.error('Failed to persist onboarding dismissal:', err);
+        }
+      },
+
+      completeTour: async () => {
+        const token = get().token;
+        const user = get().user;
+        if (!token || !user) return;
+        // Optimistic, same reasoning as dismissOnboarding: a failed PATCH only
+        // means the tour offers itself once more on the next load.
+        set({ user: { ...user, tour_completed: true } });
+        try {
+          await fetch(`${API_URL}/api/auth/tour`, {
+            method: 'PATCH',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch (err: unknown) {
+          console.error('Failed to persist tour completion:', err);
         }
       },
 

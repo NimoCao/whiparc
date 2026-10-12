@@ -144,3 +144,50 @@ func TestRunMigrationsAppliesOnceAndIsIdempotent(t *testing.T) {
 		t.Fatalf("unexpected activity_events round-trip: kind=%q payload=%q", kind, payload)
 	}
 }
+
+func TestMigration15GrandfathersExistingUsersOnly(t *testing.T) {
+	rawDB, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer rawDB.Close()
+
+	testDB := &dbHandle{DB: rawDB, backend: "sqlite"}
+	if _, err := testDB.Exec(sqliteSchemaSQL); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+
+	// Apply everything before migration 15, create an account that "already
+	// exists", then apply the rest.
+	all := migrations
+	defer func() { migrations = all }()
+	migrations = all[:len(all)-1]
+	if err := runMigrations(testDB); err != nil {
+		t.Fatalf("runMigrations before 15: %v", err)
+	}
+	if _, err := testDB.Exec("INSERT INTO users (id, email, password_hash, name) VALUES ('u_old', 'old@test.com', 'hash', 'Old')"); err != nil {
+		t.Fatalf("insert existing user: %v", err)
+	}
+	migrations = all
+	if err := runMigrations(testDB); err != nil {
+		t.Fatalf("runMigrations with 15: %v", err)
+	}
+
+	var oldDone, newDone sql.NullString
+	if err := testDB.QueryRow("SELECT tour_completed_at FROM users WHERE id = 'u_old'").Scan(&oldDone); err != nil {
+		t.Fatalf("query existing user: %v", err)
+	}
+	if !oldDone.Valid {
+		t.Fatalf("expected a pre-existing account to be marked as having seen the tour")
+	}
+
+	if _, err := testDB.Exec("INSERT INTO users (id, email, password_hash, name) VALUES ('u_new', 'new@test.com', 'hash', 'New')"); err != nil {
+		t.Fatalf("insert new user: %v", err)
+	}
+	if err := testDB.QueryRow("SELECT tour_completed_at FROM users WHERE id = 'u_new'").Scan(&newDone); err != nil {
+		t.Fatalf("query new user: %v", err)
+	}
+	if newDone.Valid {
+		t.Fatalf("expected an account created after the migration to start with tour_completed_at NULL, got %v", newDone)
+	}
+}

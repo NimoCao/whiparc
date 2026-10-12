@@ -462,6 +462,32 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     15,
+		description: "add_tour_completed_to_users",
+		up: func(tx sqlExecer) error {
+			// Nullable timestamp, same shape as migration 4's
+			// onboarding_dismissed_at: NULL means the guided dashboard tour
+			// has not been finished or skipped yet. Kept separate from that
+			// column on purpose, the checklist and the tour are dismissed
+			// independently.
+			ddl := "ALTER TABLE users ADD COLUMN tour_completed_at DATETIME"
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to add tour_completed_at: %w", err)
+			}
+			// Accounts that exist when this ships are grandfathered as
+			// having seen it (same approach as migration 2's
+			// email_verified): the tour is for first-time users, and
+			// replaying it for everyone on deploy would be noise.
+			if _, err := tx.Exec("UPDATE users SET tour_completed_at = datetime('now')"); err != nil {
+				return fmt.Errorf("failed to grandfather existing users: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet
