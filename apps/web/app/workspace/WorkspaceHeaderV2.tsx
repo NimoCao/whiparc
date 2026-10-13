@@ -41,6 +41,7 @@ export interface WorkspaceHeaderV2Props {
   saveStatus?: 'saved' | 'saving' | 'error' | 'readonly';
   onOpenSettings?: () => void;
   onOpenHistory?: () => void;
+  onStartTour?: () => void;
   agentStatus?: string | null;
   migrationStatus?: { gated: boolean; has_active_agent: boolean; grace_period_end: string } | null;
 }
@@ -98,6 +99,7 @@ export function WorkspaceHeaderV2({
   saveStatus = 'saved',
   onOpenSettings,
   onOpenHistory,
+  onStartTour,
   agentStatus = null,
   migrationStatus = null,
 }: WorkspaceHeaderV2Props) {
@@ -128,18 +130,20 @@ export function WorkspaceHeaderV2({
       <span style={{ fontSize: 14, color: 'var(--ink2)', whiteSpace: 'nowrap' }}>
         <strong style={{ color: 'var(--ink)', fontWeight: 600 }}>{projectDetails?.name || selectedProject}</strong>
       </span>
-      {onOpenSettings && (
-        <button type="button" onClick={onOpenSettings} className="wp-ws-iconbtn" title="Project settings" style={{ background: 'none', border: 0, color: 'var(--ink2)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-          <Icon icon="lucide:settings" width={13} />
-        </button>
-      )}
-      {onOpenHistory && (
-        <button type="button" onClick={onOpenHistory} className="wp-ws-iconbtn" title="Deploy history" style={{ background: 'none', border: 0, color: 'var(--ink2)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-          <Icon icon="lucide:history" width={13} />
-        </button>
-      )}
+      <div data-tour="project-tools" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        {onOpenSettings && (
+          <button type="button" onClick={onOpenSettings} className="wp-ws-iconbtn" title="Project settings" style={{ background: 'none', border: 0, color: 'var(--ink2)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+            <Icon icon="lucide:settings" width={13} />
+          </button>
+        )}
+        {onOpenHistory && (
+          <button type="button" onClick={onOpenHistory} className="wp-ws-iconbtn" title="Deploy history" style={{ background: 'none', border: 0, color: 'var(--ink2)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+            <Icon icon="lucide:history" width={13} />
+          </button>
+        )}
+      </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--line)', marginLeft: 4 }}>
+      <div data-tour="views" style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--line)', marginLeft: 4 }}>
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -227,181 +231,197 @@ export function WorkspaceHeaderV2({
           <Icon icon={theme === 'light' ? 'lucide:moon' : 'lucide:sun'} width={14} />
         </button>
 
-        <div style={{ position: 'relative' }}>
+        {onStartTour && (
           <button
             type="button"
-            onClick={() => setMenuOpen((o) => !o)}
-            title="More actions"
+            data-tour="help"
+            onClick={onStartTour}
+            title="Take the workspace tour"
+            aria-label="Take the workspace tour"
             className="wp-ws-iconbtn"
             style={{ width: 30, height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink2)', cursor: 'pointer' }}
           >
-            <Icon icon="lucide:more-horizontal" width={15} />
+            <Icon icon="lucide:circle-help" width={14} />
           </button>
-          {menuOpen && (
-            <>
-              <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setMenuOpen(false)} />
-              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, width: 220, background: 'var(--panel)', border: '1px solid var(--line)', zIndex: 50, padding: 4 }}>
-                <button
-                  type="button"
-                  onClick={() => onAutoDestroyChange(!autoDestroy)}
-                  className="wp-ws-navlink"
-                  style={{ ...menuItemStyle, justifyContent: 'space-between' }}
-                >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Icon icon="lucide:clock" width={12} style={{ color: autoDestroy ? 'var(--amber)' : 'var(--ink3)' }} />
-                    Auto-cleanup
-                  </span>
-                  <span style={{ fontFamily: 'var(--font-mono-marketing, monospace)', fontSize: 10, color: autoDestroy ? 'var(--amber)' : 'var(--ink3)' }}>
-                    {autoDestroy ? 'on' : 'off'}
-                  </span>
-                </button>
+        )}
 
-                <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
-
-                {[
-                  { fmt: 'tf', label: 'Terraform HCL (.tf)', icon: 'lucide:file' },
-                  { fmt: 'yml', label: 'Ansible YAML (.yml)', icon: 'lucide:clipboard' },
-                  { fmt: 'json', label: 'Kubernetes JSON (.json)', icon: 'lucide:layers' },
-                ].map((o) => (
+        <div data-tour="actions" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              title="More actions"
+              className="wp-ws-iconbtn"
+              style={{ width: 30, height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink2)', cursor: 'pointer' }}
+            >
+              <Icon icon="lucide:more-horizontal" width={15} />
+            </button>
+            {menuOpen && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setMenuOpen(false)} />
+                <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, width: 220, background: 'var(--panel)', border: '1px solid var(--line)', zIndex: 50, padding: 4 }}>
                   <button
-                    key={o.fmt}
+                    type="button"
+                    onClick={() => onAutoDestroyChange(!autoDestroy)}
+                    className="wp-ws-navlink"
+                    style={{ ...menuItemStyle, justifyContent: 'space-between' }}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Icon icon="lucide:clock" width={12} style={{ color: autoDestroy ? 'var(--amber)' : 'var(--ink3)' }} />
+                      Auto-cleanup
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-mono-marketing, monospace)', fontSize: 10, color: autoDestroy ? 'var(--amber)' : 'var(--ink3)' }}>
+                      {autoDestroy ? 'on' : 'off'}
+                    </span>
+                  </button>
+
+                  <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
+
+                  {[
+                    { fmt: 'tf', label: 'Terraform HCL (.tf)', icon: 'lucide:file' },
+                    { fmt: 'yml', label: 'Ansible YAML (.yml)', icon: 'lucide:clipboard' },
+                    { fmt: 'json', label: 'Kubernetes JSON (.json)', icon: 'lucide:layers' },
+                  ].map((o) => (
+                    <button
+                      key={o.fmt}
+                      type="button"
+                      onClick={() => {
+                        onExportFormat(o.fmt);
+                        setMenuOpen(false);
+                      }}
+                      className="wp-ws-navlink"
+                      style={menuItemStyle}
+                    >
+                      <Icon icon={o.icon} width={12} style={{ color: 'var(--accent-ink)' }} />
+                      {o.label}
+                    </button>
+                  ))}
+                  <button
                     type="button"
                     onClick={() => {
-                      onExportFormat(o.fmt);
+                      onExport();
                       setMenuOpen(false);
                     }}
                     className="wp-ws-navlink"
-                    style={menuItemStyle}
+                    style={{ ...menuItemStyle, color: 'var(--accent-ink)', fontWeight: 600 }}
                   >
-                    <Icon icon={o.icon} width={12} style={{ color: 'var(--accent-ink)' }} />
-                    {o.label}
+                    <Icon icon="lucide:folder" width={12} />
+                    Download bundle (.zip)
                   </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => {
-                    onExport();
-                    setMenuOpen(false);
-                  }}
-                  className="wp-ws-navlink"
-                  style={{ ...menuItemStyle, color: 'var(--accent-ink)', fontWeight: 600 }}
-                >
-                  <Icon icon="lucide:folder" width={12} />
-                  Download bundle (.zip)
-                </button>
 
-                <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
+                  <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isBusy && !isPlanBusy) {
-                      onClearCanvas();
-                      setMenuOpen(false);
-                    }
-                  }}
-                  disabled={isBusy || isPlanBusy}
-                  title="Delete every node and connection on this canvas"
-                  className="wp-ws-navlink"
-                  style={{ ...menuItemStyle, color: 'var(--danger)', opacity: isBusy || isPlanBusy ? 0.5 : 1, cursor: isBusy || isPlanBusy ? 'default' : 'pointer' }}
-                >
-                  <Icon icon="lucide:eraser" width={12} />
-                  Clear canvas
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isBusy && !isPlanBusy) {
+                        onClearCanvas();
+                        setMenuOpen(false);
+                      }
+                    }}
+                    disabled={isBusy || isPlanBusy}
+                    title="Delete every node and connection on this canvas"
+                    className="wp-ws-navlink"
+                    style={{ ...menuItemStyle, color: 'var(--danger)', opacity: isBusy || isPlanBusy ? 0.5 : 1, cursor: isBusy || isPlanBusy ? 'default' : 'pointer' }}
+                  >
+                    <Icon icon="lucide:eraser" width={12} />
+                    Clear canvas
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isBusy && !isPlanBusy && !autoDestroy) {
-                      onDestroy();
-                      setMenuOpen(false);
-                    }
-                  }}
-                  disabled={isBusy || isPlanBusy || autoDestroy}
-                  title={autoDestroy ? 'Destroy is disabled when Auto-Cleanup is enabled' : 'Tear down all canvas-provisioned resources'}
-                  className="wp-ws-navlink"
-                  style={{ ...menuItemStyle, color: 'var(--danger)', opacity: isBusy || isPlanBusy || autoDestroy ? 0.5 : 1, cursor: isBusy || isPlanBusy || autoDestroy ? 'default' : 'pointer' }}
-                >
-                  <Icon icon="lucide:trash-2" width={12} />
-                  Destroy
-                </button>
-              </div>
-            </>
-          )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isBusy && !isPlanBusy && !autoDestroy) {
+                        onDestroy();
+                        setMenuOpen(false);
+                      }
+                    }}
+                    disabled={isBusy || isPlanBusy || autoDestroy}
+                    title={autoDestroy ? 'Destroy is disabled when Auto-Cleanup is enabled' : 'Tear down all canvas-provisioned resources'}
+                    className="wp-ws-navlink"
+                    style={{ ...menuItemStyle, color: 'var(--danger)', opacity: isBusy || isPlanBusy || autoDestroy ? 0.5 : 1, cursor: isBusy || isPlanBusy || autoDestroy ? 'default' : 'pointer' }}
+                  >
+                    <Icon icon="lucide:trash-2" width={12} />
+                    Destroy
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onViewChange('outputs')}
+            title="Review the compiled Terraform/Ansible/Kubernetes before deploying"
+            className="wp-ws-iconbtn"
+            style={{
+              height: 30,
+              padding: '0 13px',
+              fontSize: 13,
+              border: '1px solid var(--line)',
+              background: 'transparent',
+              color: 'var(--ink)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <Icon icon="lucide:file-code" width={12} />
+            Preview
+          </button>
+
+          <button
+            type="button"
+            onClick={onPlan}
+            disabled={isPlanBusy || isBusy}
+            title="Run a real terraform plan — shows what would change without applying anything"
+            className="wp-ws-iconbtn"
+            style={{
+              height: 30,
+              padding: '0 13px',
+              fontSize: 13,
+              border: '1px solid var(--line)',
+              background: 'transparent',
+              color: 'var(--ink)',
+              cursor: isPlanBusy || isBusy ? 'default' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              opacity: isPlanBusy || isBusy ? 0.6 : 1,
+            }}
+          >
+            <Icon icon={isPlanBusy ? 'lucide:loader-2' : 'lucide:play'} className={isPlanBusy ? 'animate-spin' : undefined} width={12} />
+            Plan
+          </button>
+
+          <button
+            type="button"
+            onClick={onDeploy}
+            disabled={isBusy || isPlanBusy}
+            className="wp-blueprint"
+            style={{
+              position: 'relative',
+              height: 30,
+              padding: '0 15px',
+              fontSize: 13,
+              fontFamily: 'var(--font-display, inherit)',
+              fontWeight: 600,
+              background: 'var(--accent)',
+              color: 'var(--on-accent)',
+              border: 0,
+              cursor: isBusy || isPlanBusy ? 'default' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              opacity: isBusy || isPlanBusy ? 0.7 : 1,
+            }}
+          >
+            <BlueprintCorners />
+            <Icon icon={isBusy ? 'lucide:loader-2' : 'lucide:rocket'} className={isBusy ? 'animate-spin' : undefined} width={12} />
+            Deploy
+          </button>
         </div>
-
-        <button
-          type="button"
-          onClick={() => onViewChange('outputs')}
-          title="Review the compiled Terraform/Ansible/Kubernetes before deploying"
-          className="wp-ws-iconbtn"
-          style={{
-            height: 30,
-            padding: '0 13px',
-            fontSize: 13,
-            border: '1px solid var(--line)',
-            background: 'transparent',
-            color: 'var(--ink)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          <Icon icon="lucide:file-code" width={12} />
-          Preview
-        </button>
-
-        <button
-          type="button"
-          onClick={onPlan}
-          disabled={isPlanBusy || isBusy}
-          title="Run a real terraform plan — shows what would change without applying anything"
-          className="wp-ws-iconbtn"
-          style={{
-            height: 30,
-            padding: '0 13px',
-            fontSize: 13,
-            border: '1px solid var(--line)',
-            background: 'transparent',
-            color: 'var(--ink)',
-            cursor: isPlanBusy || isBusy ? 'default' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            opacity: isPlanBusy || isBusy ? 0.6 : 1,
-          }}
-        >
-          <Icon icon={isPlanBusy ? 'lucide:loader-2' : 'lucide:play'} className={isPlanBusy ? 'animate-spin' : undefined} width={12} />
-          Plan
-        </button>
-
-        <button
-          type="button"
-          onClick={onDeploy}
-          disabled={isBusy || isPlanBusy}
-          className="wp-blueprint"
-          style={{
-            position: 'relative',
-            height: 30,
-            padding: '0 15px',
-            fontSize: 13,
-            fontFamily: 'var(--font-display, inherit)',
-            fontWeight: 600,
-            background: 'var(--accent)',
-            color: 'var(--on-accent)',
-            border: 0,
-            cursor: isBusy || isPlanBusy ? 'default' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            opacity: isBusy || isPlanBusy ? 0.7 : 1,
-          }}
-        >
-          <BlueprintCorners />
-          <Icon icon={isBusy ? 'lucide:loader-2' : 'lucide:rocket'} className={isBusy ? 'animate-spin' : undefined} width={12} />
-          Deploy
-        </button>
 
         <ProfileMenu variant="compact" blueprint />
       </div>

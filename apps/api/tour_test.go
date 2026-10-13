@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +89,90 @@ func TestCompleteTourRequiresAuth(t *testing.T) {
 	handleCompleteTour(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 without a session, got %d", w.Code)
+	}
+}
+
+func meTours(t *testing.T, userID string) (dashboard, workspace bool) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req = req.WithContext(context.WithValue(req.Context(), userContextKey, &TokenClaims{ID: userID}))
+	w := httptest.NewRecorder()
+	handleMe(w, req)
+	var resp struct {
+		TourCompleted          bool `json:"tour_completed"`
+		WorkspaceTourCompleted bool `json:"workspace_tour_completed"`
+		User                   struct {
+			WorkspaceTourCompleted bool `json:"workspace_tour_completed"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode me: %v", err)
+	}
+	if resp.WorkspaceTourCompleted != resp.User.WorkspaceTourCompleted {
+		t.Fatalf("top-level and nested workspace_tour_completed disagree")
+	}
+	return resp.TourCompleted, resp.WorkspaceTourCompleted
+}
+
+func patchTour(userID, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPatch, "/api/auth/tour", strings.NewReader(body))
+	req = req.WithContext(context.WithValue(req.Context(), userContextKey, &TokenClaims{ID: userID}))
+	w := httptest.NewRecorder()
+	handleCompleteTour(w, req)
+	return w
+}
+
+func TestCompleteTourToursAreIndependent(t *testing.T) {
+	oldDB := db
+	testDB := setupAuthTestDB(t)
+	defer testDB.Close()
+	db = testDB
+	defer func() { db = oldDB }()
+
+	if _, err := testDB.Exec("INSERT INTO users (id, email, password_hash, name, email_verified) VALUES ('u_1', 'u1@test.com', 'hash', 'Tester', TRUE)"); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	if d, w := meTours(t, "u_1"); d || w {
+		t.Fatalf("a new account must start with neither tour completed, got dashboard=%v workspace=%v", d, w)
+	}
+
+	if w := patchTour("u_1", `{"tour":"workspace"}`); w.Code != http.StatusOK {
+		t.Fatalf("workspace tour: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if d, w := meTours(t, "u_1"); d || !w {
+		t.Fatalf("completing the workspace tour must not complete the dashboard one, got dashboard=%v workspace=%v", d, w)
+	}
+
+	// An empty body (clients that predate the workspace tour) and an explicit
+	// "dashboard" both mean the dashboard tour.
+	if w := patchTour("u_1", ``); w.Code != http.StatusOK {
+		t.Fatalf("empty body: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if d, w := meTours(t, "u_1"); !d || !w {
+		t.Fatalf("expected both tours completed, got dashboard=%v workspace=%v", d, w)
+	}
+	if w := patchTour("u_1", `{"tour":"dashboard"}`); w.Code != http.StatusOK {
+		t.Fatalf("explicit dashboard: expected 200, got %d", w.Code)
+	}
+}
+
+func TestCompleteTourRejectsUnknownTour(t *testing.T) {
+	oldDB := db
+	testDB := setupAuthTestDB(t)
+	defer testDB.Close()
+	db = testDB
+	defer func() { db = oldDB }()
+
+	if _, err := testDB.Exec("INSERT INTO users (id, email, password_hash, name, email_verified) VALUES ('u_1', 'u1@test.com', 'hash', 'Tester', TRUE)"); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	for _, body := range []string{`{"tour":"tour_completed_at"}`, `{"tour":"nope"}`, `not json`} {
+		if w := patchTour("u_1", body); w.Code != http.StatusBadRequest {
+			t.Fatalf("body %q: expected 400, got %d", body, w.Code)
+		}
+	}
+	if d, w := meTours(t, "u_1"); d || w {
+		t.Fatalf("a rejected request must not complete anything, got dashboard=%v workspace=%v", d, w)
 	}
 }

@@ -37,6 +37,8 @@ import { DEFAULT_INSTANCE_PARAMS, DEFAULT_SG_PARAMS } from '../lib/terraformDefa
 import type { Project } from '../lib/types';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
+import { ProductTour } from '../components/ProductTour';
+import { getWorkspaceTourSteps } from './workspaceTour';
 import { LEGACY_TOKEN_SCOPE_STYLE } from '../components/ui/legacy-token-scope';
 import { WorkspaceHeaderV2, type WorkspaceView } from './WorkspaceHeaderV2';
 import { LibraryPanelV2 } from './LibraryPanelV2';
@@ -798,6 +800,8 @@ const InspectorPanel: React.FC<InspectorPanelProps> = ({
 
   return (
     <aside
+      // A collapsed inspector is zero-width, so it is not a tour target.
+      data-tour={collapsed ? undefined : 'inspector'}
       className={clsx(
         "wp-legacy-token-scope bg-card/95 backdrop-blur-md flex flex-col shrink-0 z-20 transition-all duration-300 relative overflow-visible",
         collapsed ? "w-0 border-l-0" : "w-90 border-l border-border"
@@ -3025,7 +3029,7 @@ function WorkspaceContent() {
     }
   }, [hasProjectParam, router]);
 
-  const { token, user, hasHydrated } = useAuthStore();
+  const { token, user, hasHydrated, completeTour } = useAuthStore();
 
   const syncWsRef = useRef<WebSocket | null>(null);
   const isIncomingSyncRef = useRef<boolean>(false);
@@ -3049,6 +3053,31 @@ function WorkspaceContent() {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [theme, setTheme] = useState<Theme>('dark');
   const [activeView, setActiveView] = useState<WorkspaceView>('canvas');
+
+  // First-visit guided tour. Starts by itself once for an account that has not
+  // finished it (`workspace_tour_completed === false`; undefined while the
+  // profile is still loading, which deliberately does not count), as soon as
+  // the project has loaded and nothing else is open on top of the canvas.
+  // The header "?" button replays it without touching the saved flag.
+  const needsWorkspaceTour = user?.workspace_tour_completed === false;
+  const [tourState, setTourState] = useState<'idle' | 'running' | 'closed'>('idle');
+  const nothingOpen = !isSettingsOpen && !isHistoryOpen && !isCustomNodeOpen;
+  if (tourState === 'idle' && needsWorkspaceTour && projectDetails && activeView === 'canvas' && nothingOpen) setTourState('running');
+  const workspaceTourSteps = useMemo(() => getWorkspaceTourSteps(), []);
+  const handleTourClose = useCallback(() => {
+    setTourState('closed');
+    if (needsWorkspaceTour) void completeTour('workspace');
+  }, [needsWorkspaceTour, completeTour]);
+  // The tour spotlights canvas-view elements, so a replay from the Variables or
+  // Code Preview tab switches back first and starts once they are on screen.
+  const startWorkspaceTour = () => {
+    if (activeView === 'canvas') {
+      setTourState('running');
+    } else {
+      setActiveView('canvas');
+      window.setTimeout(() => setTourState('running'), 80);
+    }
+  };
 
   const [deployStatus, setDeployStatus] = useState<"IDLE" | "PENDING" | "RUNNING" | "CLEANUP" | "SUCCESS" | "FAILED">("IDLE");
   // Separate from deployStatus, deliberately: a plan is a read-only dry run,
@@ -3933,6 +3962,7 @@ function WorkspaceContent() {
         saveStatus={saveStatus}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenHistory={() => setIsHistoryOpen(true)}
+        onStartTour={startWorkspaceTour}
         agentStatus={agentStatus}
         migrationStatus={migrationStatus}
       />
@@ -3953,7 +3983,7 @@ function WorkspaceContent() {
             customNodesLocked={Boolean(projectEntitlements?.plan_enforcement && !projectEntitlements.custom_nodes_allowed)}
           />
 
-          <main className="flex-1 relative overflow-hidden flex flex-col" style={{ background: 'var(--ground)' }}>
+          <main data-tour="canvas" className="flex-1 relative overflow-hidden flex flex-col" style={{ background: 'var(--ground)' }}>
             <WorkspaceCanvas
               deployStatus={deployStatus}
               planStatus={planStatus}
@@ -3962,6 +3992,7 @@ function WorkspaceContent() {
             />
 
             <div
+              data-tour="sandbox"
               style={{
                 position: 'absolute',
                 top: 14,
@@ -4043,6 +4074,8 @@ function WorkspaceContent() {
         onClose={() => setIsCustomNodeOpen(false)}
         projectId={projectId}
       />
+
+      {tourState === 'running' && <ProductTour steps={workspaceTourSteps} onClose={handleTourClose} />}
 
       <SnapshotHistoryDrawer
         isOpen={isHistoryOpen}
