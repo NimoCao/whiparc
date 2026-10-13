@@ -338,6 +338,7 @@ func main() {
 	mux.HandleFunc("GET /api/avatars/{key}", handleGetAvatar)
 	mux.Handle("DELETE /api/auth/account", AuthMiddleware(http.HandlerFunc(handleDeleteAccount)))
 	mux.Handle("PATCH /api/auth/onboarding", AuthMiddleware(http.HandlerFunc(handleDismissOnboarding)))
+	mux.Handle("PATCH /api/auth/tour", AuthMiddleware(http.HandlerFunc(handleCompleteTour)))
 	mux.HandleFunc("POST /api/auth/forgot", enableCORS(handleForgotPassword))
 	// Deliberately not GET /api/auth/reset/{token} — that collides with
 	// GET /api/auth/{provider}/login as an ambiguous pattern from Go's
