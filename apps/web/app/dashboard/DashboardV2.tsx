@@ -19,6 +19,8 @@ import { BrandLogo } from '../components/brand/BrandLogo';
 import { getDashboardTourSteps } from './dashboardTour';
 import type { ActivityEvent, Project, RunRow, Team } from '../lib/types';
 import { useAggregatedRuns } from '../lib/useAggregatedRuns';
+import { useProTemplateAccess } from '../lib/usePlan';
+import { usePendingContributions } from '../lib/usePendingContributions';
 import { useAnyActiveAgent } from '../lib/useAnyActiveAgent';
 import { useActivity } from '../lib/useActivity';
 import { useAbortableEffect, isAbortError } from '../lib/useAbortableEffect';
@@ -82,6 +84,37 @@ function formatDuration(startIso: string, endIso: string): string {
   const secs = Math.round(ms / 1000);
   if (secs < 60) return `${secs}s`;
   return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+}
+
+// "Cloud spend this month". No cost data exists yet (nothing in the schema or
+// API records it, see product-memory 08.5 A3), so this never shows a figure:
+// entitled users get an honest "coming soon" state, and Free users on a
+// plan-enforcing (hosted) deployment get the same tile locked behind an
+// Upgrade button, since spend tracking is a Pro feature.
+function CloudSpendTile({ locked, runsThisMonth, isLoading }: { locked: boolean; runsThisMonth: number; isLoading: boolean }) {
+  const valueStyle: CSSProperties = { margin: '6px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, lineHeight: 1, color: 'var(--ink)' };
+  return (
+    <div style={{ position: 'relative', border: '1px solid var(--line)', padding: '14px 16px', overflow: 'hidden' }}>
+      <p style={labelStyle}>Cloud spend this month</p>
+      <div aria-hidden={locked} style={locked ? { filter: 'blur(5px)', userSelect: 'none', pointerEvents: 'none' } : undefined}>
+        <p style={valueStyle}>{locked ? '$0.00' : '—'}</p>
+        <p style={{ margin: '5px 0 0', fontSize: 13, color: 'var(--ink2)' }}>
+          {locked ? 'Estimated from your runs' : isLoading ? 'Loading…' : `Cost estimates coming soon · ${runsThisMonth} ${runsThisMonth === 1 ? 'run' : 'runs'} this month`}
+        </p>
+      </div>
+      {locked && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, background: 'color-mix(in srgb, var(--panel) 72%, transparent)' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--ink2)' }}>
+            <Icon icon="lucide:lock" width={13} />
+            Spend tracking is a Pro feature
+          </span>
+          <Link href="/team" className="wp-dash-submit" style={{ height: 28, padding: '0 12px', display: 'inline-flex', alignItems: 'center', fontSize: 12.5, background: 'var(--accent)', color: 'var(--on-accent)', textDecoration: 'none' }}>
+            Upgrade to Pro
+          </Link>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Latest ~5 runs, most-failed-projects for the "Needs a look" tile, and a
@@ -418,6 +451,17 @@ function DashboardContent() {
 
   const { runs: aggregatedRuns, isLoading: isLoadingRuns } = useAggregatedRuns(token);
   const runStats = useMemo(() => computeDashboardRunStats(aggregatedRuns), [aggregatedRuns]);
+  // Cloud spend is a Pro feature: on a hosted deployment that enforces plans, a
+  // Free user sees the locked tile with an Upgrade button instead.
+  const { canUsePro } = useProTemplateAccess();
+  const pendingContributions = usePendingContributions(token);
+  const runsThisMonth = useMemo(() => {
+    const d = new Date();
+    return aggregatedRuns.filter((r) => {
+      const c = new Date(r.createdAt);
+      return c.getFullYear() === d.getFullYear() && c.getMonth() === d.getMonth();
+    }).length;
+  }, [aggregatedRuns]);
   const { hasActiveAgent } = useAnyActiveAgent(token, projects);
   const { events: activityEvents, isLoading: isLoadingActivity } = useActivity(token, 10);
 
@@ -605,6 +649,26 @@ function DashboardContent() {
             <p style={{ margin: 0, fontFamily: 'var(--font-mono-marketing)', fontSize: 10.5, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink3)' }}>{dateLabel}</p>
           </div>
 
+          {pendingContributions.length > 0 && (
+            <div className="wp-blueprint" style={{ position: 'relative', background: 'var(--panel)', padding: '16px 20px' }}>
+              <BlueprintCorners />
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, color: 'var(--ink)' }}>
+                {pendingContributions.length} template {pendingContributions.length === 1 ? 'contribution' : 'contributions'} awaiting your review
+              </h2>
+              <ul style={{ margin: '10px 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: 6 }}>
+                {pendingContributions.slice(0, 5).map((c) => (
+                  <li key={c.id} style={{ fontSize: 13.5, color: 'var(--ink2)' }}>
+                    <Link href={`/templates/${c.template_id}`} className="wp-dash-link" style={{ color: 'var(--accent-ink)' }}>
+                      {c.template_title || 'Template'}
+                    </Link>
+                    {' · '}
+                    {c.contributor_name || 'A contributor'}: {c.note.length > 90 ? `${c.note.slice(0, 90)}…` : c.note}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {isFirstRun && (
             <div data-tour="checklist" className="wp-blueprint" style={{ position: 'relative', background: 'var(--panel)', padding: '22px 24px' }}>
               <BlueprintCorners />
@@ -684,11 +748,7 @@ function DashboardContent() {
                 )}
               </p>
             </div>
-            <div style={{ border: '1px solid var(--line)', padding: '14px 16px' }}>
-              <p style={labelStyle}>Cloud spend this month</p>
-              <p style={{ margin: '6px 0 0', fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, lineHeight: 1, color: 'var(--ink)' }}>$0.00</p>
-              <p style={{ margin: '5px 0 0', fontSize: 13, color: 'var(--ink2)' }}>19 of 23 runs were local</p>
-            </div>
+            <CloudSpendTile locked={!canUsePro} runsThisMonth={runsThisMonth} isLoading={isLoadingRuns} />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,2.1fr) minmax(250px,1fr)', gap: 'clamp(18px,2vw,24px)', alignItems: 'start' }}>

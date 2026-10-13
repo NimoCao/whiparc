@@ -1,12 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { Icon } from '@iconify/react';
+import { BlueprintCorners } from './ui/BlueprintCorners';
 import { useAuthStore } from '../store/useAuthStore';
 import type { Project } from '../lib/types';
+import './ui/blueprint.css';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+
+const labelStyle: CSSProperties = { display: 'block', margin: '0 0 6px', fontSize: 10, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink2)' };
+const fieldStyle: CSSProperties = { width: '100%', padding: '8px 10px', fontSize: 13, background: 'var(--ground)', color: 'var(--ink)', border: '1px solid var(--line)', outline: 'none', fontFamily: 'inherit' };
 
 const CATEGORIES = ['AWS', 'Kubernetes', 'Ansible', 'Networking', 'CI/CD', 'General'];
 
@@ -18,8 +23,8 @@ interface PublishTemplateModalProps {
 
 // "Publish as Template" — Phase 5's entry point from the dashboard. Snapshots
 // the project's current canvas into a new public /templates listing (POST
-// /api/projects/{id}/templates). Follows ProjectSettingsModal's exact modal
-// chrome/form-field styling for visual consistency within the dashboard.
+// /api/projects/{id}/templates). Uses the blueprint design-system chrome (same
+// as ContributeTemplateModal), not the legacy Tailwind modal style.
 //
 // UX choices deliberately follow the ui-ux-pro-max skill's guidance for this
 // kind of publish flow (see product-memory 10.1 "Phase 5"): the consequence
@@ -41,6 +46,15 @@ export function PublishTemplateModal({ isOpen, onClose, project }: PublishTempla
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [publishedId, setPublishedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -92,178 +106,133 @@ export function PublishTemplateModal({ isOpen, onClose, project }: PublishTempla
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-secondary border border-border rounded-2xl shadow-2xl w-[560px] max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
-        <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-card/30">
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.6)', backdropFilter: 'blur(2px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="publish-template-title"
+        onClick={(e) => e.stopPropagation()}
+        className="wp-blueprint"
+        style={{ position: 'relative', width: 520, maxWidth: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--panel)', textAlign: 'left' }}
+      >
+        <BlueprintCorners />
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
           <div>
-            <h3 className="text-lg font-heading font-bold text-white">Publish as Template</h3>
-            <p className="text-xs text-slate-400">Share a snapshot of this project&apos;s canvas with the community.</p>
+            <h3 id="publish-template-title" style={{ margin: 0, fontFamily: 'var(--font-display, inherit)', fontWeight: 600, fontSize: 17, color: 'var(--ink)' }}>Publish as Template</h3>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--ink2)' }}>Share a snapshot of this project&apos;s canvas with the community.</p>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-secondary transition-all cursor-pointer"
-          >
-            <Icon icon="lucide:x" className="text-lg" />
+          <button type="button" onClick={onClose} aria-label="Close" style={{ background: 'none', border: 0, color: 'var(--ink2)', cursor: 'pointer', padding: 4, flexShrink: 0 }}>
+            <Icon icon="lucide:x" width={16} />
           </button>
         </div>
 
-        <div className="flex-grow overflow-y-auto p-6 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-slate-800">
-          {publishedId ? (
-            <div className="flex flex-col items-center text-center gap-4 py-6">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
-                <Icon icon="lucide:check" className="text-2xl text-emerald-400" />
-              </div>
-              <div>
-                <h4 className="text-base font-bold text-white">Your template is live</h4>
-                <p className="text-sm text-slate-400 mt-1 max-w-sm">
-                  &quot;{title.trim()}&quot; is now visible to everyone in the public Template Catalog.
-                </p>
-              </div>
-              <div className="flex items-center gap-3 mt-2">
-                <button
-                  onClick={onClose}
-                  className="px-4 py-2 text-sm bg-secondary text-slate-200 hover:bg-input rounded-lg transition-all cursor-pointer font-semibold border border-border"
-                >
-                  Done
-                </button>
-                <Link
-                  href={`/templates/${publishedId}`}
-                  className="px-4 py-2 text-sm bg-primary text-primary-foreground hover:opacity-95 rounded-lg transition-all cursor-pointer font-semibold flex items-center gap-1.5"
-                >
-                  View Template
-                  <Icon icon="lucide:arrow-right" className="text-sm" />
-                </Link>
-              </div>
+        {publishedId ? (
+          <div style={{ padding: 28, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, textAlign: 'center' }}>
+            <Icon icon="lucide:check-circle-2" width={28} style={{ color: 'var(--accent-ink)' }} />
+            <p style={{ margin: 0, fontFamily: 'var(--font-display, inherit)', fontWeight: 600, fontSize: 15, color: 'var(--ink)' }}>Your template is live</p>
+            <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink2)', maxWidth: 340, lineHeight: 1.5 }}>
+              &quot;{title.trim()}&quot; is now visible to everyone in the public Template Catalog.
+            </p>
+            <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+              <button type="button" onClick={onClose} style={{ height: 34, padding: '0 18px', fontSize: 13, border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink)', cursor: 'pointer' }}>Done</button>
+              <Link href={`/templates/${publishedId}`} style={{ height: 34, padding: '0 18px', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13.5, fontWeight: 600, background: 'var(--accent)', color: 'var(--on-accent)', textDecoration: 'none' }}>
+                View Template
+                <Icon icon="lucide:arrow-right" width={14} />
+              </Link>
             </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="p-3 bg-primary/10 border border-primary/20 text-primary rounded-lg text-xs leading-relaxed flex items-start gap-2">
-                <Icon icon="lucide:info" className="text-base shrink-0 mt-0.5" />
-                <span>
-                  This publishes a snapshot of this project&apos;s current canvas to the public Template Catalog. Editing
-                  the project afterward won&apos;t change the published template — you can unpublish it anytime from your
-                  templates.
-                </span>
-              </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} style={{ overflowY: 'auto', padding: 22, display: 'grid', gap: 16 }}>
+            <div style={{ border: '1px solid var(--line)', padding: '10px 12px', fontSize: 12.5, color: 'var(--ink2)', lineHeight: 1.5, display: 'flex', gap: 8 }}>
+              <Icon icon="lucide:info" width={14} style={{ flexShrink: 0, marginTop: 2, color: 'var(--accent-ink)' }} />
+              <span>
+                This publishes a snapshot of this project&apos;s current canvas to the public Template Catalog. Editing the project afterward won&apos;t change the published template.
+              </span>
+            </div>
 
-              <div>
-                <label htmlFor="template-title" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Title
-                </label>
-                <input
-                  id="template-title"
-                  type="text"
-                  value={title}
-                  onChange={(e) => {
-                    setTitle(e.target.value);
-                    if (titleError) setTitleError(null);
-                  }}
-                  aria-invalid={!!titleError}
-                  aria-describedby={titleError ? 'template-title-error' : undefined}
-                  className={`w-full px-3 py-2 bg-background/40 border rounded-lg text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all ${
-                    titleError ? 'border-red-500/60' : 'border-border focus:border-primary'
-                  }`}
-                  placeholder="e.g. Three-Tier Web App (EC2 + RDS)"
-                />
-                {titleError && (
-                  <p id="template-title-error" className="mt-1.5 text-xs text-red-400">
-                    {titleError}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label htmlFor="template-description" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Description
-                </label>
-                <textarea
-                  id="template-description"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 bg-background/40 border border-border rounded-lg text-white placeholder:text-slate-500 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/40 transition-all resize-none"
-                  placeholder="What does this template set up, and who is it for?"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="template-category" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Category
-                </label>
-                <select
-                  id="template-category"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full px-3 py-2 bg-background/40 border border-border rounded-lg text-white focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/40 transition-all cursor-pointer"
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="template-tags" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Tags
-                </label>
-                <div className="w-full px-2 py-2 bg-background/40 border border-border rounded-lg focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/40 transition-all flex flex-wrap items-center gap-1.5">
-                  {tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-300 bg-card border border-border/80 rounded-md px-2 py-1"
-                    >
-                      {tag}
-                      <button
-                        type="button"
-                        onClick={() => removeTag(tag)}
-                        aria-label={`Remove tag ${tag}`}
-                        className="text-slate-500 hover:text-white cursor-pointer"
-                      >
-                        <Icon icon="lucide:x" className="text-[10px]" />
-                      </button>
-                    </span>
-                  ))}
-                  <input
-                    id="template-tags"
-                    type="text"
-                    value={tagDraft}
-                    onChange={(e) => setTagDraft(e.target.value)}
-                    onKeyDown={handleTagKeyDown}
-                    onBlur={addTag}
-                    className="flex-1 min-w-[100px] bg-transparent text-sm text-white placeholder:text-slate-500 outline-none px-1 py-0.5"
-                    placeholder={tags.length === 0 ? 'aws, ec2, beginner...' : 'Add another...'}
-                  />
-                </div>
-                <p className="mt-1.5 text-[11px] text-slate-500">Press Enter or comma to add a tag.</p>
-              </div>
-
-              {submitError && (
-                <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{submitError}</p>
+            <div>
+              <label htmlFor="template-title" style={labelStyle}>Title</label>
+              <input
+                id="template-title"
+                type="text"
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  if (titleError) setTitleError(null);
+                }}
+                aria-invalid={!!titleError}
+                aria-describedby={titleError ? 'template-title-error' : undefined}
+                style={{ ...fieldStyle, borderColor: titleError ? 'var(--danger)' : 'var(--line)' }}
+                placeholder="e.g. Three-Tier Web App (EC2 + RDS)"
+              />
+              {titleError && (
+                <p id="template-title-error" style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--danger)' }}>{titleError}</p>
               )}
+            </div>
 
-              <div className="pt-4 flex justify-end gap-3 border-t border-border">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="px-4 py-2 text-sm bg-secondary text-slate-200 hover:bg-input rounded-lg transition-all cursor-pointer font-semibold"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-2 text-sm bg-primary text-primary-foreground hover:opacity-95 rounded-lg transition-all cursor-pointer font-semibold flex items-center gap-1.5 disabled:opacity-55"
-                >
-                  {isSubmitting && <Icon icon="lucide:loader-2" className="animate-spin text-sm" />}
-                  Publish Template
-                </button>
+            <div>
+              <label htmlFor="template-description" style={labelStyle}>Description</label>
+              <textarea
+                id="template-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                style={{ ...fieldStyle, resize: 'vertical' }}
+                placeholder="What does this template set up, and who is it for?"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="template-category" style={labelStyle}>Category</label>
+              <select id="template-category" value={category} onChange={(e) => setCategory(e.target.value)} style={{ ...fieldStyle, cursor: 'pointer' }}>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="template-tags" style={labelStyle}>Tags</label>
+              <div style={{ ...fieldStyle, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: '6px 8px' }}>
+                {tags.map((tag) => (
+                  <span key={tag} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: 'var(--ink2)', border: '1px solid var(--line)', padding: '2px 8px' }}>
+                    {tag}
+                    <button type="button" onClick={() => removeTag(tag)} aria-label={`Remove tag ${tag}`} style={{ background: 'none', border: 0, padding: 0, color: 'var(--ink3)', cursor: 'pointer', display: 'flex' }}>
+                      <Icon icon="lucide:x" width={10} />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  id="template-tags"
+                  type="text"
+                  value={tagDraft}
+                  onChange={(e) => setTagDraft(e.target.value)}
+                  onKeyDown={handleTagKeyDown}
+                  onBlur={addTag}
+                  style={{ flex: 1, minWidth: 100, background: 'transparent', border: 0, outline: 'none', color: 'var(--ink)', fontSize: 13, fontFamily: 'inherit', padding: '2px 2px' }}
+                  placeholder={tags.length === 0 ? 'aws, ec2, beginner...' : 'Add another...'}
+                />
               </div>
-            </form>
-          )}
-        </div>
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--ink3)' }}>Press Enter or comma to add a tag.</p>
+            </div>
+
+            {submitError && (
+              <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 10%, transparent)', border: '1px solid var(--danger)', padding: '6px 10px' }}>{submitError}</p>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
+              <button type="button" onClick={onClose} style={{ height: 34, padding: '0 16px', fontSize: 13, border: '1px solid var(--line)', background: 'transparent', color: 'var(--ink)', cursor: 'pointer' }}>Cancel</button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                style={{ height: 34, padding: '0 18px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 600, background: 'var(--accent)', color: 'var(--on-accent)', border: 0, cursor: isSubmitting ? 'not-allowed' : 'pointer', opacity: isSubmitting ? 0.6 : 1 }}
+              >
+                {isSubmitting && <Icon icon="lucide:loader-2" className="animate-spin" width={14} />}
+                Publish Template
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

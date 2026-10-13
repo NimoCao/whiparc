@@ -157,7 +157,7 @@ func TestMigration15GrandfathersExistingUsersOnly(t *testing.T) {
 		t.Fatalf("create schema: %v", err)
 	}
 
-	// Apply everything before migration 15, create an account that "already
+	// Apply every migration below 15, create an account that "already
 	// exists", then apply the rest.
 	all := migrations
 	defer func() { migrations = all }()
