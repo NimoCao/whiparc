@@ -109,12 +109,6 @@ func main() {
 		Short: "Manage workspace projects",
 	}
 
-	var projectsListCmd = &cobra.Command{
-		Use:   "list",
-		Short: "List all accessible project workspaces",
-		Run:   runProjectsList,
-	}
-
 	var projectsCreateCmd = &cobra.Command{
 		Use:   "create",
 		Short: "Create a new visual workspace project",
@@ -132,7 +126,7 @@ func main() {
 	projectsDeleteCmd.Flags().String("id", "", "ID of the target project to delete")
 	projectsDeleteCmd.Flags().Bool("force", false, "Force delete without verification prompt")
 
-	projectsCmd.AddCommand(projectsListCmd, projectsCreateCmd, projectsDeleteCmd)
+	projectsCmd.AddCommand(projectsListCmd(), projectsCreateCmd, projectsDeleteCmd)
 
 	// import
 	var importCmd = &cobra.Command{
@@ -331,11 +325,34 @@ func runLogout(cmd *cobra.Command, args []string) {
 	printSuccess("Credentials cleared. Logged out successfully.")
 }
 
+func projectsListCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List all accessible project workspaces",
+		Run:   runProjectsList,
+	}
+	cmd.Flags().Bool("json", false, "Print projects as a JSON array on stdout (messages go to stderr)")
+	return cmd
+}
+
 func runProjectsList(cmd *cobra.Command, args []string) {
+	asJSON, _ := cmd.Flags().GetBool("json")
+
 	var projects []Project
 	err := makeRequest("GET", "/api/projects", nil, &projects)
 	if err != nil {
+		// In JSON mode stdout carries nothing but the array, so a script piping
+		// it into jq never sees a styled error line mixed into the data.
+		if asJSON {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Failed to retrieve projects: %v\n", err)
+			return
+		}
 		printError("Failed to retrieve projects: %v", err)
+		return
+	}
+
+	if asJSON {
+		printProjectsJSON(cmd, projects)
 		return
 	}
 
@@ -349,6 +366,24 @@ func runProjectsList(cmd *cobra.Command, args []string) {
 		rows[i] = []string{p.ID, p.Name, p.Visibility, p.TeamID}
 	}
 	printTable([]string{"PROJECT ID", "NAME", "VISIBILITY", "TEAM ID"}, rows)
+}
+
+// printProjectsJSON writes projects as an indented JSON array to stdout and
+// nothing else. An empty or null API response still prints "[]" so consumers
+// like `jq length` always get valid JSON; the human-readable note goes to
+// stderr.
+func printProjectsJSON(cmd *cobra.Command, projects []Project) {
+	if len(projects) == 0 {
+		projects = []Project{}
+		fmt.Fprintln(cmd.ErrOrStderr(), "No projects found.")
+	}
+
+	enc := json.NewEncoder(cmd.OutOrStdout())
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(projects); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Failed to encode projects: %v\n", err)
+	}
 }
 
 func runProjectsCreate(cmd *cobra.Command, args []string) {
