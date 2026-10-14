@@ -58,7 +58,7 @@ export interface ConsoleBarProps {
 // clicked.
 export function ConsoleBar({ isOpen, onToggle, logs, onClearLogs, deployStatus, terminalEndRef }: ConsoleBarProps) {
   return (
-    <div style={{ flexShrink: 0, borderTop: '1px solid var(--line)', background: 'var(--panel)' }}>
+    <div data-tour="console" style={{ flexShrink: 0, borderTop: '1px solid var(--line)', background: 'var(--panel)' }}>
       <button
         type="button"
         onClick={onToggle}

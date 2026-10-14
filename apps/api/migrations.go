@@ -488,6 +488,30 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     17,
+		description: "add_workspace_tour_completed_to_users",
+		up: func(tx sqlExecer) error {
+			// Same shape and reasoning as migration 15's tour_completed_at, for
+			// the first-visit workspace tour: NULL means not finished or
+			// skipped yet. A separate column because the two tours are
+			// independent (a user can reach a workspace without ever seeing
+			// the dashboard tour, and the reverse).
+			ddl := "ALTER TABLE users ADD COLUMN workspace_tour_completed_at DATETIME"
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to add workspace_tour_completed_at: %w", err)
+			}
+			// Existing accounts have, by definition, already found their way
+			// around a workspace; only accounts created from here on get it.
+			if _, err := tx.Exec("UPDATE users SET workspace_tour_completed_at = datetime('now')"); err != nil {
+				return fmt.Errorf("failed to grandfather existing users: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

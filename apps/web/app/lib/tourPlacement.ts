@@ -92,3 +92,14 @@ export function placePopover(target: Box | null, pop: Size, vp: Size, preferred:
 
   return { top: Math.max(m, maxTop), left: clamp(centerX - pop.w / 2, m, maxLeft), placement: 'overlap' };
 }
+
+// CSS `clip-path` for the tour's click-blocking layer, which covers the whole
+// viewport. An even-odd path with one hole per allowed region makes exactly
+// those regions click-through (clipped-away areas receive no pointer events).
+// Returns undefined when nothing is allowed, i.e. no clip: the layer blocks
+// everything.
+export function blockerClip(vp: Size, allow: Box[]): string | undefined {
+  if (allow.length === 0) return undefined;
+  const holes = allow.map((b) => `M${b.left} ${b.top}h${b.width}v${b.height}h${-b.width}Z`).join('');
+  return `path(evenodd, "M0 0H${vp.w}V${vp.h}H0Z${holes}")`;
+}

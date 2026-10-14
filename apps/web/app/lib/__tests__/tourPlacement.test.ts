@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TOUR_GAP, TOUR_MARGIN, placePopover, type Box, type Size } from "../tourPlacement";
+import { TOUR_GAP, TOUR_MARGIN, blockerClip, placePopover, type Box, type Size } from "../tourPlacement";
 
 const VP: Size = { w: 1280, h: 800 };
 const CARD: Size = { w: 340, h: 220 };
@@ -67,5 +67,19 @@ describe("placePopover", () => {
     expect(lower.top).toBe(TOUR_MARGIN);
     inside(upper, card, narrow);
     inside(lower, card, narrow);
+  });
+});
+
+describe("blockerClip", () => {
+  it("does not clip at all when nothing is allowed, so everything stays blocked", () => {
+    expect(blockerClip(VP, [])).toBeUndefined();
+  });
+
+  it("cuts one even-odd hole per allowed region out of the viewport", () => {
+    const library: Box = { top: 60, left: 0, width: 216, height: 700 };
+    const canvas: Box = { top: 60, left: 216, width: 700, height: 700 };
+    expect(blockerClip(VP, [library, canvas])).toBe(
+      'path(evenodd, "M0 0H1280V800H0ZM0 60h216v700h-216ZM216 60h700v700h-700Z")'
+    );
   });
 });

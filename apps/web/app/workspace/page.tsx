@@ -37,6 +37,8 @@ import { DEFAULT_INSTANCE_PARAMS, DEFAULT_SG_PARAMS } from '../lib/terraformDefa
 import type { Project } from '../lib/types';
 import { spaceGroteskFont, barlowFont, jetBrainsMonoFont } from '../fonts';
 import { THEME_PALETTES, type Theme } from '../components/ui/theme-palette';
+import { ProductTour } from '../components/ProductTour';
+import { getWorkspaceTourSteps } from './workspaceTour';
 import { LEGACY_TOKEN_SCOPE_STYLE } from '../components/ui/legacy-token-scope';
 import { WorkspaceHeaderV2, type WorkspaceView } from './WorkspaceHeaderV2';
 import { LibraryPanelV2 } from './LibraryPanelV2';
@@ -798,6 +800,8 @@ const InspectorPanel: React.FC<InspectorPanelProps> = ({
 
   return (
     <aside
+      // A collapsed inspector is zero-width, so it is not a tour target.
+      data-tour={collapsed ? undefined : 'inspector'}
       className={clsx(
         "wp-legacy-token-scope bg-card/95 backdrop-blur-md flex flex-col shrink-0 z-20 transition-all duration-300 relative overflow-visible",
         collapsed ? "w-0 border-l-0" : "w-90 border-l border-border"
@@ -3025,7 +3029,13 @@ function WorkspaceContent() {
     }
   }, [hasProjectParam, router]);
 
-  const { token, user, hasHydrated } = useAuthStore();
+  const { token, user, hasHydrated, completeTour } = useAuthStore();
+  // The effects below key on the user's id, not the `user` object: that object
+  // is replaced on every profile refresh and on tour completion, and re-running
+  // the canvas loader then re-fetches the project over whatever the user has
+  // just done on the canvas (and resets its viewport). The id never changes
+  // within a session.
+  const userId = user?.id;
 
   const syncWsRef = useRef<WebSocket | null>(null);
   const isIncomingSyncRef = useRef<boolean>(false);
@@ -3049,6 +3059,51 @@ function WorkspaceContent() {
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
   const [theme, setTheme] = useState<Theme>('dark');
   const [activeView, setActiveView] = useState<WorkspaceView>('canvas');
+
+  // First-visit guided tour. Starts by itself once for an account that has not
+  // finished it (`workspace_tour_completed === false`; undefined while the
+  // profile is still loading, which deliberately does not count), as soon as
+  // the project has loaded and nothing else is open on top of the canvas.
+  // The header "?" button replays it without touching the saved flag.
+  const needsWorkspaceTour = user?.workspace_tour_completed === false;
+  const [tourState, setTourState] = useState<'idle' | 'running' | 'closed'>('idle');
+  const [isCanvasLoaded, setIsCanvasLoaded] = useState(false);
+  // Whether the tour asks the user to build something (add two nodes, connect
+  // them) and the canvas counts it started from. Only on a canvas they can edit
+  // and that is still empty, so a tour (or a replay) never touches real work;
+  // anywhere else it falls back to describing the same things. Decided once, at
+  // start, because the tour freezes its step list when it mounts.
+  const [tourInteractive, setTourInteractive] = useState(false);
+  const [tourBase, setTourBase] = useState({ nodes: 0, edges: 0 });
+  const beginWorkspaceTour = () => {
+    setTourBase({ nodes: nodes.length, edges: edges.length });
+    setTourInteractive(saveStatus !== 'readonly' && nodes.length === 0);
+    setTourState('running');
+  };
+  const nothingOpen = !isSettingsOpen && !isHistoryOpen && !isCustomNodeOpen;
+  // Waits for the canvas itself (not just the project record) so "is it empty?"
+  // is answered from loaded data.
+  if (tourState === 'idle' && needsWorkspaceTour && projectDetails && isCanvasLoaded && activeView === 'canvas' && nothingOpen) beginWorkspaceTour();
+  const workspaceTourSteps = useMemo(() => getWorkspaceTourSteps({ interactive: tourInteractive }), [tourInteractive]);
+  // What the interactive steps wait for, read straight from the canvas store.
+  const workspaceTaskDone = {
+    library: nodes.length >= tourBase.nodes + 2,
+    canvas: edges.length > tourBase.edges,
+  };
+  const handleTourClose = useCallback(() => {
+    setTourState('closed');
+    if (needsWorkspaceTour) void completeTour('workspace');
+  }, [needsWorkspaceTour, completeTour]);
+  // The tour spotlights canvas-view elements, so a replay from the Variables or
+  // Code Preview tab switches back first and starts once they are on screen.
+  const startWorkspaceTour = () => {
+    if (activeView === 'canvas') {
+      beginWorkspaceTour();
+    } else {
+      setActiveView('canvas');
+      window.setTimeout(beginWorkspaceTour, 80);
+    }
+  };
 
   const [deployStatus, setDeployStatus] = useState<"IDLE" | "PENDING" | "RUNNING" | "CLEANUP" | "SUCCESS" | "FAILED">("IDLE");
   // Separate from deployStatus, deliberately: a plan is a read-only dry run,
@@ -3078,7 +3133,7 @@ function WorkspaceContent() {
   // Connect to WebSocket Room Syncing
   useEffect(() => {
     const activeToken = token;
-    if (!activeToken || !projectId || !user) return;
+    if (!activeToken || !projectId || !userId) return;
 
     const apiHost = process.env.NEXT_PUBLIC_API_URL 
       ? process.env.NEXT_PUBLIC_API_URL.replace(/^http/, 'ws') 
@@ -3100,7 +3155,7 @@ function WorkspaceContent() {
         if (type === 'init' || type === 'join' || type === 'leave') {
           const members = payload ? JSON.parse(JSON.stringify(payload)) : [];
           if (Array.isArray(members)) {
-            const activePeers = members.filter(m => m.id !== user.id);
+            const activePeers = members.filter(m => m.id !== userId);
             // Deduplicate by user ID to show each peer only once
             const uniquePeers = activePeers.filter((value, index, self) =>
               self.findIndex(m => m.id === value.id) === index
@@ -3116,7 +3171,7 @@ function WorkspaceContent() {
           }
 
           if (type === 'init' && Array.isArray(members)) {
-            const activePeers = members.filter(m => m.id !== user.id);
+            const activePeers = members.filter(m => m.id !== userId);
             if (activePeers.length > 0) {
               ws.send(JSON.stringify({ type: 'request_sync' }));
             }
@@ -3175,12 +3230,12 @@ function WorkspaceContent() {
     return () => {
       ws.close();
     };
-  }, [projectId, user, token]);
+  }, [projectId, userId, token]);
 
   // Load Project Details & Canvas State on mount
   useEffect(() => {
     const activeToken = token;
-    if (!activeToken || !projectId || !user) return;
+    if (!activeToken || !projectId || !userId) return;
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -3222,6 +3277,7 @@ function WorkspaceContent() {
           const viewport = JSON.parse(state.viewport_json || '{"x":0,"y":0,"zoom":1}');
           setViewport({ x: viewport.x || 0, y: viewport.y || 0, zoom: viewport.zoom || 1 }, { duration: 400 });
         }
+        setIsCanvasLoaded(true);
 
         // 3. Fetch custom nodes templates
         const customRes = await fetch(`${API_URL}/api/projects/${projectId}/custom-nodes`, {
@@ -3246,7 +3302,7 @@ function WorkspaceContent() {
     };
 
     loadProjectAndCanvas();
-  }, [projectId, user, setViewport, setNodes, setEdges, setVersion, setSaveStatus, setCustomLibraryNodes, setProjectId, token]);
+  }, [projectId, userId, setViewport, setNodes, setEdges, setVersion, setSaveStatus, setCustomLibraryNodes, setProjectId, token]);
 
   // Re-fetches just the canvas half of loadProjectAndCanvas above, after a
   // snapshot revert (SnapshotHistoryDrawer) has already rewritten
@@ -3285,7 +3341,7 @@ function WorkspaceContent() {
   // flickering the badge away on a transient network blip.
   useEffect(() => {
     const activeToken = token;
-    if (!activeToken || !projectId || !user) return;
+    if (!activeToken || !projectId || !userId) return;
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
     let cancelled = false;
@@ -3315,7 +3371,7 @@ function WorkspaceContent() {
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [projectId, user, token]);
+  }, [projectId, userId, token]);
 
   // Polls Phase 3's default-flip migration status (obsidian_memory/08.4) so a
   // FREE-plan user sees the "pair an agent or upgrade" notice before a deploy
@@ -3324,7 +3380,7 @@ function WorkspaceContent() {
   // same badge-hiding convention as the agent-status poll above.
   useEffect(() => {
     const activeToken = token;
-    if (!activeToken || !projectId || !user) return;
+    if (!activeToken || !projectId || !userId) return;
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
     let cancelled = false;
@@ -3353,7 +3409,7 @@ function WorkspaceContent() {
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, [projectId, user, token]);
+  }, [projectId, userId, token]);
 
   // Broadcast local canvas state changes to room peers AND auto-save debouncely to REST API
   useEffect(() => {
@@ -3792,11 +3848,16 @@ function WorkspaceContent() {
     }
     const newId = `${libNode.id}_${Date.now().toString().slice(-4)}`;
     
-    // Position formula to avoid complete overlap
-    const position = {
-      x: 350 + (nodes.length * 30) % 250,
-      y: 150 + (nodes.length * 30) % 250,
-    };
+    // Position formula to avoid complete overlap. While the tour is running the
+    // nodes are placed side by side instead (two columns, new rows below), far
+    // enough apart that the connect step can reach each node's handles.
+    const position =
+      tourState === 'running'
+        ? { x: 120 + (nodes.length % 2) * 340, y: 130 + Math.floor(nodes.length / 2) * 170 }
+        : {
+            x: 350 + (nodes.length * 30) % 250,
+            y: 150 + (nodes.length * 30) % 250,
+          };
 
     const newNode: Node = {
       id: newId,
@@ -3933,6 +3994,7 @@ function WorkspaceContent() {
         saveStatus={saveStatus}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenHistory={() => setIsHistoryOpen(true)}
+        onStartTour={startWorkspaceTour}
         agentStatus={agentStatus}
         migrationStatus={migrationStatus}
       />
@@ -3940,7 +4002,7 @@ function WorkspaceContent() {
       <EmailVerificationBanner />
 
       {activeView === 'canvas' && (
-        <div className="flex-1 flex overflow-hidden relative">
+        <div data-tour="workarea" className="flex-1 flex overflow-hidden relative">
           <LibraryPanelV2
             searchQuery={searchQuery}
             onSearchChange={handleSearchChange}
@@ -3953,7 +4015,7 @@ function WorkspaceContent() {
             customNodesLocked={Boolean(projectEntitlements?.plan_enforcement && !projectEntitlements.custom_nodes_allowed)}
           />
 
-          <main className="flex-1 relative overflow-hidden flex flex-col" style={{ background: 'var(--ground)' }}>
+          <main data-tour="canvas" className="flex-1 relative overflow-hidden flex flex-col" style={{ background: 'var(--ground)' }}>
             <WorkspaceCanvas
               deployStatus={deployStatus}
               planStatus={planStatus}
@@ -3962,6 +4024,7 @@ function WorkspaceContent() {
             />
 
             <div
+              data-tour="sandbox"
               style={{
                 position: 'absolute',
                 top: 14,
@@ -4043,6 +4106,8 @@ function WorkspaceContent() {
         onClose={() => setIsCustomNodeOpen(false)}
         projectId={projectId}
       />
+
+      {tourState === 'running' && <ProductTour steps={workspaceTourSteps} taskDone={workspaceTaskDone} onClose={handleTourClose} />}
 
       <SnapshotHistoryDrawer
         isOpen={isHistoryOpen}
