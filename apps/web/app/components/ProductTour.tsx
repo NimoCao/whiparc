@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { Icon } from '@iconify/react';
 import { BlueprintCorners } from './ui/BlueprintCorners';
-import { TOUR_MARGIN, TOUR_PAD, placePopover, type Box, type Placement, type Size } from '../lib/tourPlacement';
+import { TOUR_MARGIN, TOUR_PAD, blockerClip, placePopover, type Box, type Placement, type Size } from '../lib/tourPlacement';
 import './product-tour.css';
 
 export interface TourStep {
@@ -17,6 +17,21 @@ export interface TourStep {
   title: string;
   body: ReactNode;
   placement?: Placement;
+  // Makes the step interactive: instead of only reading, the user does
+  // something on the page and the tour waits for it. The parent reports
+  // whether it has happened through `taskDone` (keyed by step id), because
+  // only the parent knows how to observe it (e.g. a canvas store).
+  task?: TourTask;
+}
+
+export interface TourTask {
+  // Shown in the card while the task is not done yet, and once it is.
+  prompt: string;
+  done: string;
+  // `data-tour` values of the regions that stay clickable during this step.
+  // Everything else under the dim is inert, so a guided step can never
+  // trigger something unrelated (a Deploy button, say).
+  allow: string[];
 }
 
 export type TourOutcome = 'finished' | 'skipped';
@@ -24,6 +39,9 @@ export type TourOutcome = 'finished' | 'skipped';
 interface ProductTourProps {
   steps: TourStep[];
   onClose: (outcome: TourOutcome) => void;
+  // Completion of interactive steps, keyed by step id. A step that is not
+  // done can always be skipped, so a user never gets stuck waiting.
+  taskDone?: Record<string, boolean>;
 }
 
 // `instant` snaps the spotlight and card to the new geometry (used for the
@@ -31,6 +49,8 @@ interface ProductTourProps {
 // only a deliberate step change glides.
 interface Frame {
   box: Box | null;
+  // Boxes of the regions an interactive step leaves clickable.
+  allow: Box[];
   instant: boolean;
 }
 
@@ -40,14 +60,16 @@ const REMEASURE_MS = 400;
 
 const selectorFor = (target: string) => `[data-tour="${target}"]`;
 
-function sameBox(a: Box | null, b: Box): boolean {
-  return !!a && a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
-}
-
 function readBox(el: Element): Box {
   const r = el.getBoundingClientRect();
   return { top: Math.round(r.top), left: Math.round(r.left), width: Math.round(r.width), height: Math.round(r.height) };
 }
+
+function readAllow(step: TourStep): Box[] {
+  return (step.task?.allow ?? []).flatMap((t) => Array.from(document.querySelectorAll(selectorFor(t))).map(readBox));
+}
+
+const signature = (box: Box | null, allow: Box[]) => JSON.stringify([box, allow]);
 
 function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -57,19 +79,19 @@ function prefersReducedMotion(): boolean {
 // at a time and explains it in a blueprint-styled card. Rendered inside the
 // page's themed root (not portaled) so it inherits that page's design
 // tokens in both light and dark.
-export function ProductTour({ steps, onClose }: ProductTourProps) {
+export function ProductTour({ steps, onClose, taskDone = {} }: ProductTourProps) {
   const [active] = useState(() =>
     steps.filter((s) => !s.target || (typeof document !== 'undefined' && document.querySelector(selectorFor(s.target)) !== null))
   );
   const [nav, setNav] = useState({ index: 0, dir: 1 });
-  const [frame, setFrame] = useState<Frame>({ box: null, instant: true });
+  const [frame, setFrame] = useState<Frame>({ box: null, allow: [], instant: true });
   const [vp, setVp] = useState<Size>(() => (typeof window === 'undefined' ? { w: 1280, h: 800 } : { w: window.innerWidth, h: window.innerHeight }));
   const [popSize, setPopSize] = useState<Size | null>(null);
   const [leaving, setLeaving] = useState<TourOutcome | null>(null);
 
   const cardRef = useRef<HTMLDivElement>(null);
   const nextRef = useRef<HTMLButtonElement>(null);
-  const lastBox = useRef<Box | null>(null);
+  const lastSignature = useRef('');
   const firstStep = useRef(true);
   const titleId = useId();
   const bodyId = useId();
@@ -95,17 +117,14 @@ export function ProductTour({ steps, onClose }: ProductTourProps) {
 
     const publish = (instant: boolean) => {
       setVp({ w: window.innerWidth, h: window.innerHeight });
-      if (!el || !el.isConnected) {
-        lastBox.current = null;
-        setFrame({ box: null, instant });
-        return;
-      }
-      const box = readBox(el);
-      lastBox.current = box;
-      setFrame({ box, instant });
+      const allow = readAllow(step);
+      const box = el && el.isConnected ? readBox(el) : null;
+      lastSignature.current = signature(box, allow);
+      setFrame({ box, allow, instant });
     };
     const follow = () => {
-      if (el && el.isConnected && sameBox(lastBox.current, readBox(el))) return;
+      const box = el && el.isConnected ? readBox(el) : null;
+      if (signature(box, readAllow(step)) === lastSignature.current) return;
       publish(true);
     };
 
@@ -171,12 +190,12 @@ export function ProductTour({ steps, onClose }: ProductTourProps) {
         e.preventDefault();
         e.stopPropagation();
         requestClose('skipped');
-      } else if (e.key === 'ArrowRight') {
+      } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        // During an interactive step focus is often on the page (a canvas
+        // node, say) and the arrows belong to it, not to the tour.
+        if (step?.task && !cardRef.current?.contains(e.target as Node)) return;
         e.preventDefault();
-        go(1);
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        go(-1);
+        go(e.key === 'ArrowRight' ? 1 : -1);
       }
     };
   });
@@ -224,9 +243,13 @@ export function ProductTour({ steps, onClose }: ProductTourProps) {
     : { top: vp.h / 2, left: vp.w / 2, width: 0, height: 0 };
   const instantClass = frame.instant ? ' wp-tour-instant' : '';
   const isLast = nav.index === last;
+  const task = step.task;
+  const isDone = !task || Boolean(taskDone[step.id]);
 
   return (
-    <div className={`wp-tour-root${leaving ? ' wp-tour-out' : ''}`} onMouseDown={(e) => e.preventDefault()}>
+    <div className={`wp-tour-root${leaving ? ' wp-tour-out' : ''}`}>
+      <div className="wp-tour-blocker" style={{ clipPath: blockerClip(vp, frame.allow) }} onMouseDown={(e) => e.preventDefault()} aria-hidden="true" />
+
       <div className={`wp-blueprint wp-tour-hole${hole ? '' : ' wp-tour-point'}${instantClass}`} style={holeStyle} aria-hidden="true">
         <BlueprintCorners />
       </div>
@@ -256,6 +279,14 @@ export function ProductTour({ steps, onClose }: ProductTourProps) {
           <div id={bodyId} className="wp-tour-body">
             {step.body}
           </div>
+          {task && (
+            <div className="wp-tour-task" data-done={isDone}>
+              <span className="wp-tour-task-mark" aria-hidden="true">
+                {isDone ? '✓' : ''}
+              </span>
+              <span>{isDone ? task.done : task.prompt}</span>
+            </div>
+          )}
         </div>
 
         <div className="wp-tour-progress" aria-hidden="true">
@@ -279,7 +310,7 @@ export function ProductTour({ steps, onClose }: ProductTourProps) {
               </button>
             )}
             <button ref={nextRef} type="button" className="wp-tour-btn wp-tour-primary" onClick={() => go(1)}>
-              {isLast ? 'Finish' : nav.index === 0 ? 'Start tour' : 'Next'}
+              {isLast ? 'Finish' : nav.index === 0 ? 'Start tour' : !isDone ? 'Skip step' : 'Next'}
             </button>
           </div>
         </div>

@@ -11,7 +11,16 @@
   position: fixed;
   inset: 0;
   z-index: 100;
+  /* The root itself never catches clicks: the blocker below does, minus any
+     regions an interactive step opens up, and the card does for itself. */
+  pointer-events: none;
   animation: wpTourFade 0.3s ease both;
+}
+
+.wp-tour-blocker {
+  position: fixed;
+  inset: 0;
+  pointer-events: auto;
 }
 
 .wp-tour-root.wp-tour-out {
@@ -62,6 +71,7 @@
 
 .wp-tour-card.wp-blueprint {
   position: fixed;
+  pointer-events: auto;
   background: var(--panel);
   color: var(--ink);
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.42);
@@ -126,6 +136,46 @@
 }
 
 /* Progress: one hairline segment per step; the current one fills in. */
+/* The to-do an interactive step waits for. */
+.wp-tour-task {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: var(--chip);
+  border: 1px solid var(--line);
+}
+
+.wp-tour-task-mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono-marketing);
+  font-size: 11px;
+  color: var(--on-accent);
+  border: 1px solid var(--accent-ink);
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease;
+  animation: wpTourWait 1.6s ease-in-out infinite;
+}
+
+.wp-tour-task[data-done='true'] {
+  border-color: var(--accent);
+}
+
+.wp-tour-task[data-done='true'] .wp-tour-task-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: wpTourPop 0.35s cubic-bezier(0.22, 0.8, 0.25, 1) both;
+}
+
 .wp-tour-progress {
   display: flex;
   gap: 4px;
@@ -262,6 +312,25 @@
   }
 }
 
+@keyframes wpTourWait {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes wpTourPop {
+  from {
+    transform: scale(0.6);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
 @keyframes wpTourRing {
   0% {
     inset: -1px;
@@ -293,6 +362,8 @@
   .wp-tour-root.wp-tour-out,
   .wp-tour-content,
   .wp-tour-progress span.now::after,
+  .wp-tour-task-mark,
+  .wp-tour-task[data-done='true'] .wp-tour-task-mark,
   .wp-tour-hole::after {
     animation: none;
   }

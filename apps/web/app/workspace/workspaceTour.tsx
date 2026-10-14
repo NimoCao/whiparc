@@ -5,7 +5,60 @@ import type { TourStep } from '../components/ProductTour';
 // LibraryPanelV2, ConsoleBar). Steps are listed in the order the eye moves
 // across the screen: library, canvas, sandbox chip, inspector, then the
 // header, then the console. Copy only describes behavior that exists today.
-export function getWorkspaceTourSteps(): TourStep[] {
+//
+// With `interactive`, the library and canvas steps ask the user to actually
+// add two nodes and connect them (the page reports completion from the canvas
+// store); otherwise they only describe it, which is what a read-only viewer or
+// a project that already has content gets.
+export function getWorkspaceTourSteps({ interactive }: { interactive: boolean }): TourStep[] {
+  const library: TourStep = interactive
+    ? {
+        id: 'library',
+        target: 'workarea',
+        icon: 'lucide:blocks',
+        title: 'Add two nodes',
+        placement: 'bottom',
+        body: <p>The library on the left holds every node you can build with. Click a node to add it, or drag it onto the canvas. Add any two to continue.</p>,
+        task: { prompt: 'Waiting for you to add two nodes.', done: 'Two nodes on the canvas.', allow: ['library', 'canvas'] },
+      }
+    : {
+        id: 'library',
+        target: 'library',
+        icon: 'lucide:blocks',
+        title: 'The node library',
+        placement: 'right',
+        body: <p>Drag a node onto the canvas, or click it to add it. Search by name, or filter by Terraform, Ansible, Kubernetes or Target. You can author your own custom node from here too.</p>,
+      };
+
+  const canvas: TourStep = interactive
+    ? {
+        id: 'canvas',
+        target: 'canvas',
+        icon: 'lucide:workflow',
+        title: 'Connect them',
+        placement: 'bottom',
+        body: (
+          <p>
+            Drag from the small square on the edge of one node to the other node to connect them. Drag empty space to pan and scroll to zoom. The nodes you added stay on the canvas: select one and
+            press Backspace to remove it.
+          </p>
+        ),
+        task: { prompt: 'Waiting for a connection. You need two nodes first.', done: 'Connected. Connections decide the order things run in.', allow: ['canvas'] },
+      }
+    : {
+        id: 'canvas',
+        target: 'canvas',
+        icon: 'lucide:workflow',
+        title: 'The canvas',
+        placement: 'bottom',
+        body: (
+          <p>
+            Drag a node to move it, and drag from the square handle on its edge to another node to connect them. Drag empty space to pan and scroll to zoom; the zoom controls are bottom-left.
+            Click a node or a connection to edit it.
+          </p>
+        ),
+      };
+
   return [
     {
       id: 'welcome',
@@ -18,27 +71,8 @@ export function getWorkspaceTourSteps(): TourStep[] {
         </>
       ),
     },
-    {
-      id: 'library',
-      target: 'library',
-      icon: 'lucide:blocks',
-      title: 'The node library',
-      placement: 'right',
-      body: <p>Drag a node onto the canvas, or click it to add it. Search by name, or filter by Terraform, Ansible, Kubernetes or Target. You can author your own custom node from here too.</p>,
-    },
-    {
-      id: 'canvas',
-      target: 'canvas',
-      icon: 'lucide:workflow',
-      title: 'The canvas',
-      placement: 'bottom',
-      body: (
-        <p>
-          Drag a node to move it, and drag from the square handle on its edge to another node to connect them. Drag empty space to pan and scroll to zoom; the zoom controls are bottom-left.
-          Click a node or a connection to edit it.
-        </p>
-      ),
-    },
+    library,
+    canvas,
     {
       id: 'sandbox',
       target: 'sandbox',
