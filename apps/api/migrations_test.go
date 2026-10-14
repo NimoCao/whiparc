@@ -196,7 +196,7 @@ func TestMigration15GrandfathersExistingUsersOnly(t *testing.T) {
 	}
 }
 
-func TestMigration16GrandfathersExistingUsersOnly(t *testing.T) {
+func TestMigration17GrandfathersExistingUsersOnly(t *testing.T) {
 	rawDB, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -211,19 +211,19 @@ func TestMigration16GrandfathersExistingUsersOnly(t *testing.T) {
 	all := migrations
 	defer func() { migrations = all }()
 	before := 0
-	for before < len(all) && all[before].version < 16 {
+	for before < len(all) && all[before].version < 17 {
 		before++
 	}
 	migrations = all[:before]
 	if err := runMigrations(testDB); err != nil {
-		t.Fatalf("runMigrations before 16: %v", err)
+		t.Fatalf("runMigrations before 17: %v", err)
 	}
 	if _, err := testDB.Exec("INSERT INTO users (id, email, password_hash, name) VALUES ('u_old', 'old@test.com', 'hash', 'Old')"); err != nil {
 		t.Fatalf("insert existing user: %v", err)
 	}
 	migrations = all
 	if err := runMigrations(testDB); err != nil {
-		t.Fatalf("runMigrations with 16: %v", err)
+		t.Fatalf("runMigrations with 17: %v", err)
 	}
 
 	var oldDone, oldDashboard, newDone sql.NullString

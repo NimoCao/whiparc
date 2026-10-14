@@ -489,7 +489,7 @@ var migrations = []migration{
 		},
 	},
 	{
-		version:     16,
+		version:     17,
 		description: "add_workspace_tour_completed_to_users",
 		up: func(tx sqlExecer) error {
 			// Same shape and reasoning as migration 15's tour_completed_at, for
