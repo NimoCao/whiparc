@@ -489,6 +489,52 @@ var migrations = []migration{
 		},
 	},
 	{
+		version:     16,
+		description: "add_template_contributions",
+		up: func(tx sqlExecer) error {
+			// Suggest-changes workflow for the template catalog (product-memory
+			// 10.1 Phase 7): a contributor submits a snapshot of their own
+			// project's canvas against a template; the template's author (or a
+			// curator, for official templates) accepts it, which replaces the
+			// template's canvas, or rejects it. contributor_user_id has no FK,
+			// same as templates.author_user_id; account deletion removes these
+			// rows explicitly.
+			statements := []struct {
+				name string
+				ddl  string
+			}{
+				{"template_contributions", `CREATE TABLE template_contributions (
+					id TEXT PRIMARY KEY,
+					template_id TEXT NOT NULL,
+					contributor_user_id TEXT NOT NULL,
+					source_project_id TEXT,
+					note TEXT NOT NULL,
+					nodes_json TEXT NOT NULL,
+					edges_json TEXT NOT NULL,
+					viewport_json TEXT NOT NULL DEFAULT '{"x":0,"y":0,"zoom":1}',
+					status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ACCEPTED', 'REJECTED')),
+					reviewer_user_id TEXT,
+					review_note TEXT,
+					created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+					reviewed_at DATETIME,
+					FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE
+				)`},
+				{"idx_template_contributions_template", `CREATE INDEX idx_template_contributions_template ON template_contributions(template_id, status)`},
+				{"idx_template_contributions_contributor", `CREATE INDEX idx_template_contributions_contributor ON template_contributions(contributor_user_id)`},
+			}
+			for _, s := range statements {
+				ddl := s.ddl
+				if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+					ddl = pgSchema(ddl)
+				}
+				if _, err := tx.Exec(ddl); err != nil {
+					return fmt.Errorf("failed to create %s: %w", s.name, err)
+				}
+			}
+			return nil
+		},
+	},
+	{
 		version:     17,
 		description: "add_workspace_tour_completed_to_users",
 		up: func(tx sqlExecer) error {
