@@ -1350,7 +1350,19 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Merge existing and imported
-	mergedNodesJSON, mergedEdgesJSON, err := importer.ArrangeNodesAndMerge(fmt.Sprintf(`{"nodes":%s,"edges":%s}`, existingNodes, existingEdges), allNodes, allEdges)
+	existingStatePayload, err := json.Marshal(struct {
+		Nodes json.RawMessage `json:"nodes"`
+		Edges json.RawMessage `json:"edges"`
+	}{
+		Nodes: json.RawMessage(existingNodes),
+		Edges: json.RawMessage(existingEdges),
+	})
+	if err != nil {
+		http.Error(w, "Failed to build existing canvas state payload: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	mergedNodesJSON, mergedEdgesJSON, err := importer.ArrangeNodesAndMerge(string(existingStatePayload), allNodes, allEdges)
 	if err != nil {
 		http.Error(w, "Merge coordinates error: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1368,10 +1380,23 @@ func handleImport(w http.ResponseWriter, r *http.Request) {
 	roomsMutex.Lock()
 	room, exists := rooms[projectID]
 	if exists {
+		payloadBytes, err := json.Marshal(struct {
+			Nodes json.RawMessage `json:"nodes"`
+			Edges json.RawMessage `json:"edges"`
+		}{
+			Nodes: json.RawMessage(mergedNodesJSON),
+			Edges: json.RawMessage(mergedEdgesJSON),
+		})
+		if err != nil {
+			roomsMutex.Unlock()
+			http.Error(w, "Failed to build sync payload: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		msgBytes, _ := json.Marshal(SyncMessage{
 			Type:      "change",
 			ProjectID: projectID,
-			Payload:   json.RawMessage(fmt.Sprintf(`{"nodes":%s,"edges":%s}`, mergedNodesJSON, mergedEdgesJSON)),
+			Payload:   json.RawMessage(payloadBytes),
 		})
 		room.Lock()
 		for conn := range room.clients {
