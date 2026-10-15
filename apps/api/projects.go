@@ -5,6 +5,7 @@ import (
 	"api/vault"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
