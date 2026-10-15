@@ -13,7 +13,11 @@ name: CLA Check
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, closed]
-    branches: [main, dev]
+    branches: 
+      - main
+      - dev
+      - 'release/**'
+
   issue_comment:
     types: [created]
 
