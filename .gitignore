@@ -92,3 +92,6 @@ __pycache__/
 
 # Locally installed agent skills (third-party tooling; reinstall via skills-lock.json)
 /.agents/
+
+.vercel
+.env*
