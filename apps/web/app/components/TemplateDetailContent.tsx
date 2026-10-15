@@ -5,6 +5,8 @@ import { Icon } from '@iconify/react';
 import type { Node, Edge } from '@xyflow/react';
 import { TemplateCanvasPreview } from './TemplateCanvasPreview';
 import { BlueprintCorners } from './ui/BlueprintCorners';
+import { ContributeTemplateModal } from './ContributeTemplateModal';
+import { TemplateContributionsPanel } from './TemplateContributionsPanel';
 import { useAuthStore } from '../store/useAuthStore';
 import type { Template } from '../lib/types';
 import './ui/blueprint.css';
@@ -36,7 +38,9 @@ export function TemplateDetailContent({ id, variant }: TemplateDetailContentProp
   // 402 = blocked by plan (Pro template, or the Free project cap): same error
   // box, plus a way to actually do something about it.
   const [forkNeedsUpgrade, setForkNeedsUpgrade] = useState(false);
-  const [showContributeComingSoon, setShowContributeComingSoon] = useState(false);
+  const [showContribute, setShowContribute] = useState(false);
+  // Bumped after the author accepts a contribution so the canvas preview refetches.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,7 +66,7 @@ export function TemplateDetailContent({ id, variant }: TemplateDetailContentProp
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, reloadKey]);
 
   const parsedCanvas = useMemo(() => {
     if (!template) return { nodes: [] as Node[], edges: [] as Edge[], viewport: undefined };
@@ -120,6 +124,19 @@ export function TemplateDetailContent({ id, variant }: TemplateDetailContentProp
       const msg = err instanceof Error ? err.message : 'Failed to start a new project from this template.';
       setForkError(msg.includes('fetch') ? 'Cannot connect to the backend server. Please try again shortly.' : msg);
     }
+  };
+
+  const handleContribute = () => {
+    if (!hasHydrated) return;
+    if (!user) {
+      // Hard navigation for the same @modal reason as handleGetStarted. Signing in
+      // from here lands in a fresh copy of the template (login's continueAfterAuth
+      // forks it), which is the starting point for a contribution.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- intentional hard navigation, see handleGetStarted
+      window.location.href = `/login?redirect=/templates/${id}`;
+      return;
+    }
+    setShowContribute(true);
   };
 
   const previewHeight = variant === 'modal' ? 300 : 400;
@@ -253,21 +270,21 @@ export function TemplateDetailContent({ id, variant }: TemplateDetailContentProp
             )}
           </button>
 
-          {/* Lets a developer fine-tune this template's nodes/config and
-              submit changes back — planned as its own future phase after
-              Publish (Phase 5) ships, not built yet. Shown now (matching
-              the product wireframe) as an honest "coming soon" rather than
-              hidden, same treatment "Get Started" got before Phase 3
-              existed. See product-memory 10.1's roadmap for the plan. */}
-          <button
-            type="button"
-            onClick={() => setShowContributeComingSoon(true)}
-            className="wp-templates-navlink"
-            style={{ height: 38, padding: '0 22px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 600, fontFamily: 'var(--font-display)', border: '1px solid var(--line)', color: 'var(--ink)', background: 'transparent', cursor: 'pointer' }}
-          >
-            <Icon icon="lucide:git-pull-request" width={14} />
-            <span>Contribute</span>
-          </button>
+          {/* Suggest-changes flow: the contributor submits one of their own
+              projects against this template and the author accepts or rejects
+              it. The author can't contribute to their own template, they edit it
+              directly. See product-memory 10.1 Phase 7. */}
+          {!(user && user.id === template.author_user_id) && (
+            <button
+              type="button"
+              onClick={handleContribute}
+              className="wp-templates-navlink"
+              style={{ height: 38, padding: '0 22px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 600, fontFamily: 'var(--font-display)', border: '1px solid var(--line)', color: 'var(--ink)', background: 'transparent', cursor: 'pointer' }}
+            >
+              <Icon icon="lucide:git-pull-request" width={14} />
+              <span>Contribute</span>
+            </button>
+          )}
         </div>
 
         {forkError && (
@@ -282,13 +299,11 @@ export function TemplateDetailContent({ id, variant }: TemplateDetailContentProp
             )}
           </p>
         )}
-        {showContributeComingSoon && (
-          <p style={{ margin: 0, fontSize: 11.5, color: 'var(--amber)', background: 'color-mix(in srgb, var(--amber) 10%, transparent)', border: '1px solid var(--amber)', padding: '6px 10px' }}>
-            Contributing changes back to a template is launching in a future phase — this template will be open for
-            community fine-tuning soon.
-          </p>
-        )}
       </div>
+
+      {hasHydrated && user && (user.id === template.author_user_id || template.author_user_id === 'whiparc_official') && <TemplateContributionsPanel templateId={template.id} onAccepted={() => setReloadKey((k) => k + 1)} />}
+
+      <ContributeTemplateModal isOpen={showContribute} onClose={() => setShowContribute(false)} templateId={template.id} templateTitle={template.title} />
     </div>
   );
 }

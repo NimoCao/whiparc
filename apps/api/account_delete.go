@@ -219,6 +219,8 @@ func handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 
 	// 3. The user's own rows.
 	for _, stmt := range []string{
+		"DELETE FROM template_contributions WHERE contributor_user_id = ?",
+		"DELETE FROM template_contributions WHERE template_id IN (SELECT id FROM templates WHERE author_user_id = ?)",
 		"DELETE FROM templates WHERE author_user_id = ?",
 		"UPDATE activity_events SET actor_id = NULL WHERE actor_id = ?",
 		"DELETE FROM project_members WHERE user_id = ?",

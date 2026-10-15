@@ -491,6 +491,12 @@ func handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Explicit, not left to the FK cascade: SQLite only enforces FKs when the
+	// foreign_keys pragma is on.
+	if _, err := db.Exec("DELETE FROM template_contributions WHERE template_id = ?", templateID); err != nil {
+		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if _, err := db.Exec("DELETE FROM templates WHERE id = ?", templateID); err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
 		return

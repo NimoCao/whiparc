@@ -26,6 +26,7 @@ import ReactFlowCanvasNode from '../components/ReactFlowCanvasNode';
 import BlueprintEdge from '../components/canvas/BlueprintEdge';
 import EdgeInspector from '../components/canvas/EdgeInspector';
 import CustomNodeModal from '../components/CustomNodeModal';
+import { GcpComingSoonDialog } from '../components/GcpComingSoonDialog';
 import { ProjectSettingsModal } from '../components/ProjectSettingsModal';
 import { SnapshotHistoryDrawer } from '../components/SnapshotHistoryDrawer';
 import { InputWithVariablePicker } from '../components/VariablePicker';
@@ -2551,7 +2552,7 @@ function getDefaultParametersForNode(nodeId: string): Record<string, unknown> {
   return {};
 }
 
-// --- MOCK LIBRARY DATA ---
+// --- STATIC NODE CATALOG (compiled in bundleGenerator.ts / exportYaml.ts) ---
 const LIBRARY_NODES: LibraryNode[] = [
   {
     id: 'aws_target',
@@ -2786,9 +2787,11 @@ interface WorkspaceCanvasProps {
   planStatus: string;
   peerCursors: Record<string, { x: number; y: number; name: string; color: string }>;
   handleMouseMove: (e: React.MouseEvent) => void;
+  // Fired when a GCP Target is dropped on the canvas (GCP is not yet tested end to end).
+  onGcpTargetAdded: () => void;
 }
 
-function WorkspaceCanvas({ deployStatus, planStatus, peerCursors = {}, handleMouseMove }: WorkspaceCanvasProps) {
+function WorkspaceCanvas({ deployStatus, planStatus, peerCursors = {}, handleMouseMove, onGcpTargetAdded }: WorkspaceCanvasProps) {
   const {
     nodes,
     edges,
@@ -2911,7 +2914,8 @@ function WorkspaceCanvas({ deployStatus, planStatus, peerCursors = {}, handleMou
 
     addNode(newNode);
     setSelectedNodeId(newNodeId);
-  }, [screenToFlowPosition, addNode, setSelectedNodeId, isPipelineRunning]);
+    if (id === 'gcp_target') onGcpTargetAdded();
+  }, [screenToFlowPosition, addNode, setSelectedNodeId, isPipelineRunning, onGcpTargetAdded]);
 
   return (
     <div
@@ -2995,6 +2999,7 @@ function WorkspaceCanvas({ deployStatus, planStatus, peerCursors = {}, handleMou
 // --- WORKSPACE LAYOUT WRAPPER ---
 function WorkspaceContent() {
   const router = useRouter();
+  const [showGcpNotice, setShowGcpNotice] = useState(false);
   const { 
     nodes, 
     edges, 
@@ -3890,6 +3895,7 @@ function WorkspaceContent() {
     // Call store action
     useCanvasStore.getState().addNode(newNode);
     useCanvasStore.getState().setSelectedNodeId(newId);
+    if (libNode.id === 'gcp_target') setShowGcpNotice(true);
   };
 
   // Compile playbook YAML from current canvas nodes
@@ -4021,7 +4027,9 @@ function WorkspaceContent() {
               planStatus={planStatus}
               peerCursors={peerCursors}
               handleMouseMove={handleMouseMove}
+              onGcpTargetAdded={() => setShowGcpNotice(true)}
             />
+            <GcpComingSoonDialog isOpen={showGcpNotice} onClose={() => setShowGcpNotice(false)} />
 
             <div
               data-tour="sandbox"

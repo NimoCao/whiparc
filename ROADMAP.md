@@ -13,9 +13,9 @@ yet. Each is a good, self-contained first contribution.
 
 | Where | What is not real | Suggested direction |
 | :--- | :--- | :--- |
-| Dashboard overview, "Cloud spend this month" card (`apps/web/app/dashboard/DashboardV2.tsx`) | The amount and the "N of M runs were local" caption are hard-coded | Derive the caption from the runs already fetched for the dashboard, and either compute spend or remove the card until it can be |
-| Right panel, security audit (`apps/web/app/components/RightPanel.tsx`) | Shows "Security audit coming soon" | Implement basic checks over the canvas graph (for example open ports, public storage), or hide the section |
-| Template catalog, "Contribute" action | Not wired to a contribution workflow | Define the workflow in a Discussion first |
+| Dashboard overview, "Cloud spend this month" tile (`apps/web/app/dashboard/DashboardV2.tsx`) | No cost data is computed. The tile says "Cost estimates coming soon" (locked behind an Upgrade button for Free users on a plan-enforcing deployment) | Estimate cost from the compiled Terraform at deploy time and sum it per month, see [#148](https://github.com/whiparc/whiparc/issues/148) |
+| Security audit (`apps/web/app/components/RightPanel.tsx`) | The only mention is a "Security audit coming soon" label in a legacy component that no longer renders, so the live inspector has no audit | Implement basic checks over the canvas graph in the live inspector, see [#147](https://github.com/whiparc/whiparc/issues/147) |
+| GCP Target | Not tested end to end; dropping one on the canvas shows a "coming soon" notice | Validate compile and deploy against a real GCP project, then remove the notice, see [#149](https://github.com/whiparc/whiparc/issues/149) |
 
 If you fix one, remove its row in the same pull request.
 
