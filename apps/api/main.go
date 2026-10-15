@@ -338,6 +338,7 @@ func main() {
 	mux.HandleFunc("GET /api/avatars/{key}", handleGetAvatar)
 	mux.Handle("DELETE /api/auth/account", AuthMiddleware(http.HandlerFunc(handleDeleteAccount)))
 	mux.Handle("PATCH /api/auth/onboarding", AuthMiddleware(http.HandlerFunc(handleDismissOnboarding)))
+	mux.Handle("PATCH /api/auth/tour", AuthMiddleware(http.HandlerFunc(handleCompleteTour)))
 	mux.HandleFunc("POST /api/auth/forgot", enableCORS(handleForgotPassword))
 	// Deliberately not GET /api/auth/reset/{token} — that collides with
 	// GET /api/auth/{provider}/login as an ambiguous pattern from Go's
@@ -423,6 +424,12 @@ func main() {
 	mux.Handle("POST /api/templates/{id}/use", AuthMiddleware(http.HandlerFunc(handleUseTemplate)))
 	mux.Handle("PATCH /api/templates/{id}", AuthMiddleware(http.HandlerFunc(handleUpdateTemplate)))
 	mux.Handle("DELETE /api/templates/{id}", AuthMiddleware(http.HandlerFunc(handleDeleteTemplate)))
+	mux.Handle("POST /api/templates/{id}/contributions", AuthMiddleware(http.HandlerFunc(handleCreateTemplateContribution)))
+	mux.Handle("GET /api/templates/{id}/contributions", AuthMiddleware(http.HandlerFunc(handleListTemplateContributions)))
+	mux.Handle("POST /api/templates/{id}/contributions/{cid}/accept", AuthMiddleware(http.HandlerFunc(handleAcceptTemplateContribution)))
+	mux.Handle("POST /api/templates/{id}/contributions/{cid}/reject", AuthMiddleware(http.HandlerFunc(handleRejectTemplateContribution)))
+	mux.Handle("GET /api/contributions/pending", AuthMiddleware(http.HandlerFunc(handleListPendingContributions)))
+	mux.Handle("GET /api/contributions/mine", AuthMiddleware(http.HandlerFunc(handleListMyContributions)))
 
 	// Join Requests
 	mux.Handle("POST /api/projects/{id}/join-request", AuthMiddleware(http.HandlerFunc(handleCreateJoinRequest)))

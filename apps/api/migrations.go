@@ -462,6 +462,102 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version:     15,
+		description: "add_tour_completed_to_users",
+		up: func(tx sqlExecer) error {
+			// Nullable timestamp, same shape as migration 4's
+			// onboarding_dismissed_at: NULL means the guided dashboard tour
+			// has not been finished or skipped yet. Kept separate from that
+			// column on purpose, the checklist and the tour are dismissed
+			// independently.
+			ddl := "ALTER TABLE users ADD COLUMN tour_completed_at DATETIME"
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to add tour_completed_at: %w", err)
+			}
+			// Accounts that exist when this ships are grandfathered as
+			// having seen it (same approach as migration 2's
+			// email_verified): the tour is for first-time users, and
+			// replaying it for everyone on deploy would be noise.
+			if _, err := tx.Exec("UPDATE users SET tour_completed_at = datetime('now')"); err != nil {
+				return fmt.Errorf("failed to grandfather existing users: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		version:     16,
+		description: "add_template_contributions",
+		up: func(tx sqlExecer) error {
+			// Suggest-changes workflow for the template catalog (product-memory
+			// 10.1 Phase 7): a contributor submits a snapshot of their own
+			// project's canvas against a template; the template's author (or a
+			// curator, for official templates) accepts it, which replaces the
+			// template's canvas, or rejects it. contributor_user_id has no FK,
+			// same as templates.author_user_id; account deletion removes these
+			// rows explicitly.
+			statements := []struct {
+				name string
+				ddl  string
+			}{
+				{"template_contributions", `CREATE TABLE template_contributions (
+					id TEXT PRIMARY KEY,
+					template_id TEXT NOT NULL,
+					contributor_user_id TEXT NOT NULL,
+					source_project_id TEXT,
+					note TEXT NOT NULL,
+					nodes_json TEXT NOT NULL,
+					edges_json TEXT NOT NULL,
+					viewport_json TEXT NOT NULL DEFAULT '{"x":0,"y":0,"zoom":1}',
+					status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ACCEPTED', 'REJECTED')),
+					reviewer_user_id TEXT,
+					review_note TEXT,
+					created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+					reviewed_at DATETIME,
+					FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE
+				)`},
+				{"idx_template_contributions_template", `CREATE INDEX idx_template_contributions_template ON template_contributions(template_id, status)`},
+				{"idx_template_contributions_contributor", `CREATE INDEX idx_template_contributions_contributor ON template_contributions(contributor_user_id)`},
+			}
+			for _, s := range statements {
+				ddl := s.ddl
+				if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+					ddl = pgSchema(ddl)
+				}
+				if _, err := tx.Exec(ddl); err != nil {
+					return fmt.Errorf("failed to create %s: %w", s.name, err)
+				}
+			}
+			return nil
+		},
+	},
+	{
+		version:     17,
+		description: "add_workspace_tour_completed_to_users",
+		up: func(tx sqlExecer) error {
+			// Same shape and reasoning as migration 15's tour_completed_at, for
+			// the first-visit workspace tour: NULL means not finished or
+			// skipped yet. A separate column because the two tours are
+			// independent (a user can reach a workspace without ever seeing
+			// the dashboard tour, and the reverse).
+			ddl := "ALTER TABLE users ADD COLUMN workspace_tour_completed_at DATETIME"
+			if t, ok := tx.(*dbTx); ok && t.backend == "postgres" {
+				ddl = pgSchema(ddl)
+			}
+			if _, err := tx.Exec(ddl); err != nil {
+				return fmt.Errorf("failed to add workspace_tour_completed_at: %w", err)
+			}
+			// Existing accounts have, by definition, already found their way
+			// around a workspace; only accounts created from here on get it.
+			if _, err := tx.Exec("UPDATE users SET workspace_tour_completed_at = datetime('now')"); err != nil {
+				return fmt.Errorf("failed to grandfather existing users: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // runMigrations applies, in version order, any migration above not yet

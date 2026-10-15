@@ -1,0 +1,377 @@
+/* Guided product tour: a dimmed page with one spotlighted element and a
+   blueprint-style card. Everything reads the page's own theme tokens
+   (--panel, --line, --ink, --accent, ...) so it follows light and dark. */
+
+/* Targets near the sticky header must not be scrolled underneath it. */
+[data-tour] {
+  scroll-margin-block: 84px;
+}
+
+.wp-tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  /* The root itself never catches clicks: the blocker below does, minus any
+     regions an interactive step opens up, and the card does for itself. */
+  pointer-events: none;
+  animation: wpTourFade 0.3s ease both;
+}
+
+.wp-tour-blocker {
+  position: fixed;
+  inset: 0;
+  pointer-events: auto;
+}
+
+.wp-tour-root.wp-tour-out {
+  animation: wpTourFadeOut 0.18s ease both;
+  pointer-events: none;
+}
+
+/* The spotlight. Its enormous box-shadow is the dimmed page; the element
+   itself is the clear window. Position and size glide between steps. */
+.wp-tour-hole.wp-blueprint {
+  position: fixed;
+  border-color: var(--accent);
+  pointer-events: none;
+  box-shadow: 0 0 0 100vmax rgba(10, 11, 13, 0.7);
+  transition:
+    top 0.45s cubic-bezier(0.22, 0.8, 0.25, 1),
+    left 0.45s cubic-bezier(0.22, 0.8, 0.25, 1),
+    width 0.45s cubic-bezier(0.22, 0.8, 0.25, 1),
+    height 0.45s cubic-bezier(0.22, 0.8, 0.25, 1),
+    border-color 0.3s ease;
+}
+
+.wp-tour-hole.wp-blueprint > .wp-corner {
+  color: var(--accent);
+  transition: opacity 0.3s ease;
+}
+
+/* No target: keep the dimming shadow, hide the frame. */
+.wp-tour-hole.wp-tour-point.wp-blueprint {
+  border-color: transparent;
+}
+
+.wp-tour-hole.wp-tour-point > .wp-corner,
+.wp-tour-hole.wp-tour-point::after {
+  opacity: 0;
+  animation: none;
+}
+
+/* A soft ring that breathes outward from the spotlight. */
+.wp-tour-hole::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--accent);
+  pointer-events: none;
+  animation: wpTourRing 2.6s ease-out infinite;
+}
+
+.wp-tour-card.wp-blueprint {
+  position: fixed;
+  pointer-events: auto;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.42);
+  transition:
+    top 0.45s cubic-bezier(0.22, 0.8, 0.25, 1),
+    left 0.45s cubic-bezier(0.22, 0.8, 0.25, 1),
+    opacity 0.2s ease;
+}
+
+.wp-tour-hole.wp-tour-instant,
+.wp-tour-card.wp-tour-instant {
+  transition: none;
+}
+
+.wp-tour-content {
+  padding: 20px 22px 4px;
+  animation: wpTourStep 0.38s cubic-bezier(0.22, 0.8, 0.25, 1) both;
+}
+
+.wp-tour-kicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono-marketing);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+
+.wp-tour-title {
+  margin: 9px 0 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+.wp-tour-body {
+  margin-top: 8px;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--ink2);
+}
+
+.wp-tour-body p {
+  margin: 0;
+}
+
+.wp-tour-body p + p {
+  margin-top: 8px;
+}
+
+.wp-tour-body code {
+  padding: 1px 5px;
+  font-family: var(--font-mono-marketing);
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--chip);
+  border: 1px solid var(--line);
+}
+
+/* Progress: one hairline segment per step; the current one fills in. */
+/* The to-do an interactive step waits for. */
+.wp-tour-task {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: var(--chip);
+  border: 1px solid var(--line);
+}
+
+.wp-tour-task-mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono-marketing);
+  font-size: 11px;
+  color: var(--on-accent);
+  border: 1px solid var(--accent-ink);
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease;
+  animation: wpTourWait 1.6s ease-in-out infinite;
+}
+
+.wp-tour-task[data-done='true'] {
+  border-color: var(--accent);
+}
+
+.wp-tour-task[data-done='true'] .wp-tour-task-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: wpTourPop 0.35s cubic-bezier(0.22, 0.8, 0.25, 1) both;
+}
+
+.wp-tour-progress {
+  display: flex;
+  gap: 4px;
+  padding: 16px 22px 0;
+}
+
+.wp-tour-progress span {
+  position: relative;
+  flex: 1;
+  height: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.wp-tour-progress span.done {
+  background: var(--accent);
+}
+
+.wp-tour-progress span.now::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform-origin: left center;
+  animation: wpTourFill 0.5s cubic-bezier(0.22, 0.8, 0.25, 1) both;
+}
+
+.wp-tour-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 22px 18px;
+}
+
+.wp-tour-actions-main {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.wp-tour-hint {
+  font-family: var(--font-mono-marketing);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink3);
+}
+
+.wp-tour-btn {
+  height: 32px;
+  padding: 0 14px;
+  font-family: var(--font-body-marketing), system-ui, sans-serif;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.wp-tour-btn:hover {
+  border-color: var(--accent-ink);
+}
+
+.wp-tour-btn:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+.wp-tour-btn.wp-tour-primary {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.wp-tour-btn.wp-tour-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.wp-tour-btn.wp-tour-ghost {
+  padding: 0 4px;
+  color: var(--ink2);
+  border-color: transparent;
+}
+
+.wp-tour-btn.wp-tour-ghost:hover {
+  color: var(--ink);
+  border-color: transparent;
+}
+
+@keyframes wpTourFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes wpTourFadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Content slides in from the direction of travel (next: from the right,
+   back: from the left). */
+@keyframes wpTourStep {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--wp-tour-dir, 1) * 12px));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes wpTourFill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes wpTourWait {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes wpTourPop {
+  from {
+    transform: scale(0.6);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes wpTourRing {
+  0% {
+    inset: -1px;
+    opacity: 0.55;
+  }
+  100% {
+    inset: -10px;
+    opacity: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .wp-tour-content {
+    padding: 16px 16px 2px;
+  }
+  .wp-tour-progress {
+    padding: 14px 16px 0;
+  }
+  .wp-tour-actions {
+    padding: 12px 16px 16px;
+  }
+  .wp-tour-hint {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wp-tour-root,
+  .wp-tour-root.wp-tour-out,
+  .wp-tour-content,
+  .wp-tour-progress span.now::after,
+  .wp-tour-task-mark,
+  .wp-tour-task[data-done='true'] .wp-tour-task-mark,
+  .wp-tour-hole::after {
+    animation: none;
+  }
+  .wp-tour-hole.wp-blueprint,
+  .wp-tour-card.wp-blueprint {
+    transition: none;
+  }
+  .wp-tour-root.wp-tour-out {
+    opacity: 0;
+  }
+}

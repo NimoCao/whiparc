@@ -143,7 +143,7 @@ export function LibraryPanelV2({
   const categories = Array.from(new Set(filteredNodes.map((n) => n.category)));
 
   return (
-    <aside style={{ width: 216, flexShrink: 0, borderRight: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <aside data-tour="library" style={{ width: 216, flexShrink: 0, borderRight: '1px solid var(--line)', background: 'var(--panel)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ padding: 12, borderBottom: '1px solid var(--line)', display: 'grid', gap: 10 }}>
         {!isReadOnly && onCreateCustomNode && (
           <button
