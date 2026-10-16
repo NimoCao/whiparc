@@ -1,6 +1,7 @@
 # Reverse proxy for the Hetzner launch runbook (see the "Domain & DNS wiring"
 # and "Deploy & wire DNS" sections). One box, one Caddy process, two site
-# blocks routing by hostname to docker-compose.hosted.yml's published ports —
+# blocks (plus the dev-api block below) routing by hostname to
+# docker-compose.hosted.yml's published ports —
 # TLS is automatic (Caddy issues and renews Let's Encrypt certs per hostname
 # on first request), no certbot cron job to maintain.
 #
@@ -19,4 +20,10 @@ api.whiparc.com {
 
 gateway.whiparc.com {
 	reverse_proxy localhost:9090
+}
+
+# Dev backend (docker-compose.hosted-dev.yml, published on 127.0.0.1:8081).
+# Needs its own DNS A record, `dev-api`, pointing at this VM like the two above.
+dev-api.whiparc.com {
+	reverse_proxy localhost:8081
 }

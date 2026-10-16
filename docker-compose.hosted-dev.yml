@@ -1,0 +1,88 @@
+# Dev backend for dev-api.whiparc.com: the API behind the dev frontend
+# (dev.whiparc.com on Vercel, assigned to the `dev` branch). It is a standalone
+# file on purpose, not an override of docker-compose.hosted.yml: Compose merges
+# override files, so an override would still load the base file's `.env`
+# (production secrets), publish 8080 alongside it, and clash on the fixed
+# container_name values. A separate file with its own project name, env file,
+# volumes and port keeps the two stacks from sharing anything.
+#
+# Runs on the same VM as production, next to it:
+#   - project name `whiparc-dev` (production is `whiparc-hosted`)
+#   - API published on 127.0.0.1:8081 only; deploy/Caddyfile proxies
+#     dev-api.whiparc.com to it
+#   - its own Postgres container and volume, never the production Supabase
+#     database (see the database policy: dev is Postgres, not SQLite)
+#   - its own secrets in `.env.dev`, never `.env`
+#
+# Usage on the VM (the --env-file flag is required: Compose reads ${...}
+# interpolation from --env-file, not from a service's env_file, and without the
+# flag it would read the production `.env` instead):
+#   cp .env.dev.example .env.dev      # then fill in every value
+#   docker compose --env-file .env.dev -f docker-compose.hosted-dev.yml up -d
+#
+# Deliberately not included: agent-gateway (and so SANDBOX_AGENT_BETA stays
+# off; the sandbox-agent pairing routes are not registered) and published
+# LocalStack/Postgres ports. Add a dev gateway only if the sandbox agent has to
+# be tested against dev.
+name: whiparc-dev
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    # `dev` is the tag publish-api-image.yml moves on every push to the dev
+    # branch. Set API_IMAGE_TAG in .env.dev to pin another tag.
+    image: ghcr.io/whiparc/whiparc/api:${API_IMAGE_TAG:-dev}
+    container_name: whiparc-api-dev
+    ports:
+      # Loopback only: Caddy on the same host is the sole entry point.
+      - "127.0.0.1:8081:8080"
+    env_file:
+      - path: .env.dev
+        required: true
+    environment:
+      - PORT=8080
+      - IS_DOCKER=true
+      - VERBOSE=true
+      - DB_DRIVER=postgres
+      - DATABASE_URL=postgres://postgres:${DEV_POSTGRES_PASSWORD:?set DEV_POSTGRES_PASSWORD in .env.dev}@postgres:5432/whiparc_dev?sslmode=disable
+    volumes:
+      # Runner workspace (Terraform/Ansible run directories), same as hosted.
+      - dev-api-workspace:/app/data
+      # Read-only shared sandbox public key fallback, same as hosted.
+      - ./sandbox:/app/sandbox:ro
+    depends_on:
+      localstack:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  # The Runner reaches LocalStack by the service name `localstack` when
+  # IS_DOCKER=true, so dev deploys work the same as production's sandbox runs.
+  localstack:
+    container_name: whiparc-localstack-dev
+    image: localstack/localstack:3.4.0
+    environment:
+      - SERVICES=ec2,s3
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  postgres:
+    container_name: whiparc-postgres-dev
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_PASSWORD=${DEV_POSTGRES_PASSWORD:?set DEV_POSTGRES_PASSWORD in .env.dev}
+      - POSTGRES_DB=whiparc_dev
+    volumes:
+      - dev-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  dev-api-workspace:
+  dev-postgres-data:

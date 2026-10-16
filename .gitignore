@@ -95,3 +95,4 @@ __pycache__/
 
 .vercel
 .env*
+!.env.dev.example
