@@ -1,0 +1,79 @@
+name: Release — Tag & Publish
+
+# Step 3 of the two-step Release Flow: fires automatically once a
+# release/vX.Y.Z -> main PR (opened by "Release — Open Promotion PRs") is
+# merged by a human. At that point the code is already on main through a
+# reviewed PR — nothing here needs to bypass branch protection, it only
+# adds a tag and a GitHub Release on top of a merge that already happened.
+#
+# Pushing the vX.Y.Z tag is what already triggers publish-api-image.yml /
+# publish-base-image.yml (both listen for `tags: v*`), which build and
+# publish the images and move the floating `stable` tag the Hetzner VM
+# pulls. This workflow does not deploy to that VM — there's no CD hook to
+# it; picking up `stable` there is still a manual
+# `docker compose -f docker-compose.hosted.yml pull && up -d`.
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  tag-and-release:
+    name: Tag and publish the merged release
+    if: |
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Derive version from the release branch name
+        id: version
+        run: |
+          ref="${{ github.event.pull_request.head.ref }}"
+          version="${ref#release/v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Couldn't parse a plain semver out of branch '$ref'"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Tag the release
+        run: |
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --title "Whiparc v${{ steps.version.outputs.version }}" \
+            --target main \
+            --generate-notes
+
+      - name: Summary
+        run: |
+          {
+            echo "### Shipped v${{ steps.version.outputs.version }}"
+            echo ""
+            echo "- Tagged \`v${{ steps.version.outputs.version }}\` on \`main\`"
+            echo "- GitHub Release created"
+            echo "- Image publishing kicked off (publish-api-image.yml / publish-base-image.yml)"
+            echo "- Still manual: pull \`stable\` on the Hetzner VM"
+            echo "- Don't forget the \`release/v${{ steps.version.outputs.version }} -> dev\` PR if it isn't merged yet"
+          } >> "$GITHUB_STEP_SUMMARY"

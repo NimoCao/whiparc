@@ -1,0 +1,82 @@
+name: Release — Open Promotion PRs
+
+# Step 2 of the two-step Release Flow. Run this once release/vX.Y.Z (from
+# "Release — Cut Branch") is stable and ready to ship.
+#
+# This deliberately does NOT push straight to main or dev — both are
+# protected by the "branch-policy" ruleset, which requires a PR and a
+# review. Scripting around that with a bot token would defeat the point of
+# the ruleset, so instead this just opens the two PRs a human merges by
+# hand:
+#   - release/vX.Y.Z -> main   (the actual "go live" merge)
+#   - release/vX.Y.Z -> dev    (carries back any bugfix made only on the
+#     release branch during stabilization, so dev doesn't lose it)
+#
+# Merging the main PR is what triggers "Release — Tag & Publish" (the next
+# workflow), which cuts the version tag and the GitHub Release once that
+# merge lands.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to promote, without the v prefix (e.g. 1.0.0)'
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-prs:
+    name: Open release/v${{ inputs.version }} PRs into main and dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Confirm release branch exists
+        run: |
+          if ! git ls-remote --exit-code --heads origin "release/v${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::release/v${{ inputs.version }} doesn't exist — run 'Release — Cut Branch' first."
+            exit 1
+          fi
+
+      - name: Open PR into main
+        id: pr_main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          url=$(gh pr create \
+            --base main \
+            --head "release/v${{ inputs.version }}" \
+            --title "release: v${{ inputs.version }}" \
+            --body "Promotes \`release/v${{ inputs.version }}\` to \`main\` — the go-live merge for v${{ inputs.version }}. Merging this is what triggers the tag + GitHub Release workflow." \
+            2>/dev/null || gh pr list --base main --head "release/v${{ inputs.version }}" --json url --jq '.[0].url')
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Open PR into dev
+        id: pr_dev
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          url=$(gh pr create \
+            --base dev \
+            --head "release/v${{ inputs.version }}" \
+            --title "chore(release): merge back v${{ inputs.version }} into dev" \
+            --body "Carries back whatever landed only on \`release/v${{ inputs.version }}\` during stabilization, so \`dev\` doesn't lose it. No rush — merge whenever." \
+            2>/dev/null || gh pr list --base dev --head "release/v${{ inputs.version }}" --json url --jq '.[0].url')
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Opened promotion PRs for v${{ inputs.version }}"
+            echo ""
+            echo "- Into \`main\`: ${{ steps.pr_main.outputs.url }}"
+            echo "- Into \`dev\`: ${{ steps.pr_dev.outputs.url }}"
+            echo ""
+            echo "Review and merge the \`main\` PR to ship — that merge triggers"
+            echo "the tag + GitHub Release automatically. Merge the \`dev\` PR"
+            echo "whenever, no rush."
+          } >> "$GITHUB_STEP_SUMMARY"

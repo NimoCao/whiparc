@@ -1,0 +1,75 @@
+name: Release — Cut Branch
+
+# Step 1 of the two-step Release Flow: cuts release/vX.Y.Z from the chosen
+# base (dev, by default) at its current tip. This branch then gets ONLY
+# stabilization — version bump, changelog, critical bugfixes via PR, gated
+# by the "release branch policy" ruleset — no new features. When it's
+# green and you're confident, run "Release — Open Promotion PRs" (the next
+# workflow) to merge it toward main and dev.
+#
+# This does not publish anything and does not touch main or dev — it only
+# creates a new branch, so it's safe to run as soon as dev looks
+# release-ready.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, without the v prefix (e.g. 1.0.0)'
+        required: true
+      base:
+        description: 'Branch to cut the release from'
+        required: false
+        default: 'dev'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-cut-v${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  cut-branch:
+    name: Create release/v${{ inputs.version }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ${{ inputs.base }}
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.base }}
+          fetch-depth: 0
+
+      - name: Validate version format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must be plain semver (e.g. 1.0.0), got '${{ inputs.version }}'"
+            exit 1
+          fi
+
+      - name: Fail fast if the release branch already exists
+        run: |
+          if git ls-remote --exit-code --heads origin "release/v${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::release/v${{ inputs.version }} already exists — bump the version or delete it first."
+            exit 1
+          fi
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push release branch
+        run: |
+          git checkout -b "release/v${{ inputs.version }}"
+          git push origin "release/v${{ inputs.version }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Cut \`release/v${{ inputs.version }}\` from \`${{ inputs.base }}\`"
+            echo ""
+            echo "Stabilize here — bugfixes and version bumps only, via PR"
+            echo "(gated by the \`release branch policy\` ruleset). When it's"
+            echo "ready, run **Release — Open Promotion PRs**."
+          } >> "$GITHUB_STEP_SUMMARY"
