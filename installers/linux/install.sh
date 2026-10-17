@@ -36,7 +36,17 @@ case "$arch" in
 esac
 
 binary="whiparc-${goos}-${goarch}"
-url="https://github.com/${REPO}/releases/latest/download/${binary}"
+# Not GitHub's "releases/latest/download" shortcut: that resolves to the
+# repo-wide newest Release, which can be a platform vX.Y.Z release with no CLI
+# assets (404). Resolve the newest stable cli-vX.Y.Z tag instead (the pattern
+# excludes prereleases like cli-v1.2.3-beta.1), falling back to the rolling
+# cli-latest release if the GitHub API is unreachable or rate-limited.
+tag="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=30" 2>/dev/null \
+  | grep -o '"tag_name": *"cli-v[0-9][0-9.]*"' \
+  | head -n 1 \
+  | sed 's/.*"\(cli-v[^"]*\)"/\1/')" || tag=""
+[ -n "$tag" ] || tag="cli-latest"
+url="https://github.com/${REPO}/releases/download/${tag}/${binary}"
 
 echo "Downloading ${binary}..."
 mkdir -p "$INSTALL_DIR"

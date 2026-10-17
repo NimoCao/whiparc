@@ -470,20 +470,20 @@ func main() {
 			return
 		}
 		// Deliberately NOT GitHub's generic "/releases/latest/download/" shortcut:
-		// "latest" there means the repo's most recently published non-draft,
-		// non-prerelease Release, repo-wide — not "the latest CLI release."
-		// Every filename this handler ever serves (whiparc-setup-windows-amd64.exe,
-		// whiparc-macos.pkg, install.sh, the raw binaries) is a CLI artifact,
-		// published only under cli-vX.Y.Z tags by cli-release.yml, which also
-		// keeps the rolling `cli-latest` Release/tag pointed at the newest one.
-		// Once this repo has non-CLI Releases too (the plain vX.Y.Z platform
-		// tags from publish-api-image.yml etc.), GitHub's generic "latest"
-		// pointer can move to one of those instead — exactly what happened the
-		// first time a v1.0.0 platform Release was cut, which made every
-		// installer link 404 since that release has no CLI assets. Pinning to
-		// the cli-latest tag specifically avoids depending on which Release
-		// GitHub considers newest overall.
-		githubURL := "https://github.com/whiparc/whiparc/releases/download/cli-latest/" + filename
+		// "latest" there means the repo's newest non-draft, non-prerelease
+		// Release repo-wide, not "the latest CLI release." Once the platform
+		// vX.Y.Z Releases exist (no CLI assets attached), it points at one of
+		// those and every installer link 404s.
+		//
+		// Instead resolve the newest stable cli-vX.Y.Z Release and redirect to
+		// that asset directly. The rolling `cli-latest` Release is only the
+		// fallback (GitHub API unavailable or asset missing from every stable
+		// release): it is a dev build off main, so it must not win over a
+		// real release.
+		githubURL := latestStableCLIAssetURL(filename)
+		if githubURL == "" {
+			githubURL = "https://github.com/whiparc/whiparc/releases/download/cli-latest/" + filename
+		}
 		http.Redirect(w, r, githubURL, http.StatusTemporaryRedirect)
 	}))
 

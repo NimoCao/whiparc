@@ -51,14 +51,25 @@ type cliRelease struct {
 }
 
 func handleGetCLIReleases(w http.ResponseWriter, r *http.Request) {
+	body, err := getCLIReleasesBody()
+	if err != nil {
+		http.Error(w, "Failed to fetch CLI releases", http.StatusServiceUnavailable)
+		return
+	}
+	writeCLIReleasesResponse(w, body)
+}
+
+// getCLIReleasesBody returns the marshaled release list, serving it from the
+// in-memory cache while fresh and falling back to a stale copy if GitHub is
+// unreachable or rate-limiting us.
+func getCLIReleasesBody() ([]byte, error) {
 	cliReleasesMu.Lock()
 	fresh := len(cliReleasesCache) > 0 && time.Since(cliReleasesCachedAt) < cliReleasesCacheTTL
 	cached := cliReleasesCache
 	cliReleasesMu.Unlock()
 
 	if fresh {
-		writeCLIReleasesResponse(w, cached)
-		return
+		return cached, nil
 	}
 
 	body, err := fetchAndBuildCLIReleases()
@@ -71,11 +82,9 @@ func handleGetCLIReleases(w http.ResponseWriter, r *http.Request) {
 		stale := cliReleasesCache
 		cliReleasesMu.Unlock()
 		if len(stale) > 0 {
-			writeCLIReleasesResponse(w, stale)
-			return
+			return stale, nil
 		}
-		http.Error(w, "Failed to fetch CLI releases", http.StatusServiceUnavailable)
-		return
+		return nil, err
 	}
 
 	cliReleasesMu.Lock()
@@ -83,7 +92,41 @@ func handleGetCLIReleases(w http.ResponseWriter, r *http.Request) {
 	cliReleasesCachedAt = time.Now()
 	cliReleasesMu.Unlock()
 
-	writeCLIReleasesResponse(w, body)
+	return body, nil
+}
+
+// latestStableCLIAssetURL returns the download URL of the named asset on the
+// newest stable (non-prerelease) cli-v* Release. It exists because GitHub's
+// own "latest" shortcuts are repo-wide and can point at a non-CLI platform
+// Release (v1.0.x) that has no installer assets. Returns "" when no stable
+// CLI release carries the asset or the release list is unavailable, so
+// callers can fall back to a static URL.
+func latestStableCLIAssetURL(filename string) string {
+	body, err := getCLIReleasesBody()
+	if err != nil {
+		return ""
+	}
+	var releases []cliRelease
+	if err := json.Unmarshal(body, &releases); err != nil {
+		return ""
+	}
+	return pickStableCLIAssetURL(releases, filename)
+}
+
+// pickStableCLIAssetURL expects releases newest-first (as
+// fetchAndBuildCLIReleases returns them).
+func pickStableCLIAssetURL(releases []cliRelease, filename string) string {
+	for _, rel := range releases {
+		if rel.Prerelease {
+			continue
+		}
+		for _, a := range rel.Assets {
+			if a.Name == filename {
+				return a.URL
+			}
+		}
+	}
+	return ""
 }
 
 func writeCLIReleasesResponse(w http.ResponseWriter, body []byte) {
