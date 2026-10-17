@@ -6,11 +6,16 @@ name: Release — Tag & Publish
 # reviewed PR — nothing here needs to bypass branch protection, it only
 # adds a tag and a GitHub Release on top of a merge that already happened.
 #
-# Pushing the vX.Y.Z tag is what already triggers publish-api-image.yml /
-# publish-base-image.yml (both listen for `tags: v*`), which build and
-# publish the images and move the floating `stable` tag the Hetzner VM
-# pulls. This workflow does not deploy to that VM — there's no CD hook to
-# it; picking up `stable` there is still a manual
+# Publishing the images (publish-api-image.yml / publish-base-image.yml, which
+# move the floating `stable` tag the Hetzner VM pulls) is NOT triggered by the
+# tag push below: GitHub does not start workflow runs from events created with
+# the default GITHUB_TOKEN (workflow_dispatch and repository_dispatch are the
+# only exceptions), so those workflows' `tags: v*` trigger never fires for a
+# tag pushed from here. v1.0.0 - v1.0.2 shipped that way and `stable` stayed on
+# the v0.1.3 image, which kept serving fixed-in-main bugs in production. The
+# "Publish images" step therefore dispatches both workflows explicitly against
+# the new tag ref. This workflow still does not deploy to the VM — there's no
+# CD hook to it; picking up `stable` there is a manual
 # `docker compose -f docker-compose.hosted.yml pull && up -d`.
 
 on:
@@ -21,6 +26,8 @@ on:
 
 permissions:
   contents: write
+  # Required for `gh workflow run` (workflow_dispatch) in the publish step.
+  actions: write
 
 jobs:
   tag-and-release:
@@ -66,6 +73,18 @@ jobs:
             --target main \
             --generate-notes
 
+      # Dispatch against the tag ref (not main): the publish workflows decide
+      # what to tag from github.ref, and `refs/tags/vX.Y.Z` is what makes them
+      # publish the immutable vX.Y.Z tag and move `stable`. Base image first so
+      # it is queued ahead of the API image that builds on its `stable` tag.
+      - name: Publish images for the new tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          gh workflow run publish-base-image.yml --repo "${{ github.repository }}" --ref "$tag"
+          gh workflow run publish-api-image.yml --repo "${{ github.repository }}" --ref "$tag"
+
       - name: Summary
         run: |
           {
@@ -73,7 +92,7 @@ jobs:
             echo ""
             echo "- Tagged \`v${{ steps.version.outputs.version }}\` on \`main\`"
             echo "- GitHub Release created"
-            echo "- Image publishing kicked off (publish-api-image.yml / publish-base-image.yml)"
+            echo "- Image publishing dispatched on the tag (publish-base-image.yml / publish-api-image.yml) — check the Actions tab that both succeed before pulling \`stable\`"
             echo "- Still manual: pull \`stable\` on the Hetzner VM"
             echo "- Don't forget the \`release/v${{ steps.version.outputs.version }} -> dev\` PR if it isn't merged yet"
           } >> "$GITHUB_STEP_SUMMARY"
