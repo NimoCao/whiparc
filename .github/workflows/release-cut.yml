@@ -8,8 +8,11 @@ name: Release — Cut Branch
 # workflow) to merge it toward main and dev.
 #
 # This does not publish anything and does not touch main or dev — it only
-# creates a new branch, so it's safe to run as soon as dev looks
-# release-ready.
+# creates a new branch. Creating it still has to satisfy the `branch-policy`
+# ruleset, which covers `release/*` and requires the base tip's status checks
+# (e.g. "Web (e2e smoke)") to have passed, so the "Wait for CI" step below
+# holds the cut until CI on the base tip has finished instead of letting the
+# push be rejected when this is run right after a merge to dev.
 
 on:
   workflow_dispatch:
@@ -24,6 +27,8 @@ on:
 
 permissions:
   contents: write
+  # Read the base tip's check runs in the "Wait for CI" step.
+  checks: read
 
 concurrency:
   group: release-cut-v${{ inputs.version }}
@@ -59,10 +64,54 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      # Waits for every check run on the base tip to finish (up to 15 min),
+      # then fails if any did not succeed. It deliberately does not hardcode
+      # the ruleset's required check names: any unfinished or failed check on
+      # the tip is a reason not to cut from it. This job's own check run
+      # (named after the job, and attached to the tip when the workflow is
+      # dispatched from the base branch) is excluded, otherwise it would wait
+      # on itself, and so would stale failures from earlier attempts of it.
+      - name: Wait for CI on ${{ inputs.base }} tip
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ inputs.base }}
+          SELF: Create release/v${{ inputs.version }}
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "Waiting for checks on ${BASE} tip ${sha}"
+          deadline=$(( $(date +%s) + 900 ))
+          while true; do
+            runs="$(gh api "repos/${REPO}/commits/${sha}/check-runs?per_page=100" \
+              | jq --arg self "$SELF" '[.check_runs[] | select(.name != $self)]')"
+            total="$(jq 'length' <<<"$runs")"
+            pending="$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")"
+            bad="$(jq -r '[.[] | select(.status == "completed" and (.conclusion | IN("failure","cancelled","timed_out","action_required","startup_failure","stale"))) | "\(.name) (\(.conclusion))"] | join(", ")' <<<"$runs")"
+
+            if [ -n "$bad" ]; then
+              echo "::error::Checks failed on ${BASE} tip ${sha}: ${bad}. Fix or re-run them before cutting the release."
+              exit 1
+            fi
+            if [ "$total" -gt 0 ] && [ "$pending" -eq 0 ]; then
+              echo "All ${total} checks on ${BASE} tip ${sha} have finished without failures."
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Timed out after 15 min waiting on ${BASE} tip ${sha} (${total} checks seen, ${pending} still running). Re-run once CI has finished."
+              exit 1
+            fi
+            echo "  ${total} checks seen, ${pending} still running; retrying in 20s"
+            sleep 20
+          done
+
       - name: Create and push release branch
         run: |
           git checkout -b "release/v${{ inputs.version }}"
-          git push origin "release/v${{ inputs.version }}"
+          if ! git push origin "release/v${{ inputs.version }}"; then
+            echo "::error::Push of release/v${{ inputs.version }} was rejected. The 'branch-policy' ruleset covers release/* and requires the tip commit's status checks to have passed; check the log above for which rule declined it."
+            exit 1
+          fi
 
       - name: Summary
         run: |
