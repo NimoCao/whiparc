@@ -937,9 +937,23 @@ func handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 // DELETE /api/projects/{id}
 func handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("id")
-	_, err := db.Exec("DELETE FROM projects WHERE id = ?", projectID)
+
+	// deleteProjectsTx removes the dependent rows by hand: SQLite runs with
+	// foreign_keys off, so a bare DELETE FROM projects would orphan canvases,
+	// encrypted credentials and agent key material (see account_delete.go).
+	tx, err := db.Begin()
 	if err != nil {
+		http.Error(w, "Failed to start transaction: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	if err := deleteProjectsTx(tx, []string{projectID}); err != nil {
 		http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		http.Error(w, "Failed to commit transaction: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
