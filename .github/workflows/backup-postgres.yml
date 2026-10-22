@@ -11,6 +11,9 @@ on:
     - cron: "0 3 * * *" # 03:00 UTC nightly
   workflow_dispatch: {}
 
+env:
+  PG_MAJOR: "17"
+
 jobs:
   backup:
     runs-on: ubuntu-latest
@@ -18,11 +21,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # pg_dump refuses to dump a server newer than itself, and the runner's
+      # default `postgresql-client` package lags behind Supabase (client 16 vs
+      # server 17.6 failed every run). Install the client from the PGDG
+      # repository and keep PG_MAJOR >= the Supabase server's major version;
+      # bump it whenever Supabase upgrades the project (a newer pg_dump can
+      # always dump an older server).
       - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y "postgresql-client-${PG_MAJOR}"
+          "/usr/lib/postgresql/${PG_MAJOR}/bin/pg_dump" --version
 
       - name: Run backup
         env:
+          PG_DUMP: /usr/lib/postgresql/${{ env.PG_MAJOR }}/bin/pg_dump
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
