@@ -17,6 +17,10 @@
 #   0 3 * * * DATABASE_URL=... R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... \
 #     R2_SECRET_ACCESS_KEY=... R2_BUCKET=... /path/to/backup-postgres.sh >> /var/log/whiparc-backup.log 2>&1
 #
+#   PG_DUMP               (optional) path to a specific pg_dump binary. Its major
+#                         version must be >= the server's (Supabase is on 17.x);
+#                         pg_dump aborts on an older client. Defaults to PATH.
+#
 # Requires: pg_dump (postgresql-client) and the AWS CLI on PATH.
 set -euo pipefail
 
@@ -27,12 +31,14 @@ for var in DATABASE_URL R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_B
 	fi
 done
 
+pg_dump_bin="${PG_DUMP:-pg_dump}"
+
 timestamp="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 dump_file="/tmp/whiparc-${timestamp}.sql.gz"
 trap 'rm -f "$dump_file"' EXIT
 
-echo "backup-postgres: dumping database to ${dump_file}"
-pg_dump "$DATABASE_URL" --no-owner --no-acl | gzip > "$dump_file"
+echo "backup-postgres: dumping database to ${dump_file} (using $("$pg_dump_bin" --version))"
+"$pg_dump_bin" "$DATABASE_URL" --no-owner --no-acl | gzip > "$dump_file"
 
 echo "backup-postgres: uploading to r2://${R2_BUCKET}/backups/whiparc-${timestamp}.sql.gz"
 AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" \
