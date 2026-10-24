@@ -200,7 +200,25 @@ func handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. Hand anything the user created inside other people's teams to that
+	// 2a. Drop this user's rows in projects that no longer exist. Project
+	// deletes used to leave their dependent rows behind, and a row with no
+	// project has no team owner to be handed to below, so the reassign would
+	// hit the NOT NULL columns and fail the whole deletion. Scoped to this
+	// user's rows: nobody else's data is touched.
+	for _, stmt := range []string{
+		"DELETE FROM canvas_states WHERE updated_by = ? AND project_id NOT IN (SELECT id FROM projects)",
+		"DELETE FROM canvas_snapshots WHERE created_by = ? AND project_id NOT IN (SELECT id FROM projects)",
+		"DELETE FROM custom_nodes WHERE created_by = ? AND project_id NOT IN (SELECT id FROM projects)",
+		"DELETE FROM cloud_credentials WHERE created_by = ? AND project_id NOT IN (SELECT id FROM projects)",
+		"DELETE FROM paired_agents WHERE created_by = ? AND project_id NOT IN (SELECT id FROM projects)",
+	} {
+		if _, err := tx.Exec(stmt, user.ID); err != nil {
+			fail("purge orphans", err)
+			return
+		}
+	}
+
+	// 2b. Hand anything the user created inside other people's teams to that
 	// team's owner (these columns are NOT NULL, so they cannot just be cleared).
 	owner := "(SELECT t.owner_id FROM projects p JOIN teams t ON t.id = p.team_id WHERE p.id = %s.project_id)"
 	for _, stmt := range []string{
