@@ -306,6 +306,12 @@ jobs:
 
   release:
     name: Create GitHub Release
+    # Publish only from push events (tags, or main). pull_request runs still
+    # build and package everything above as a check, but must not publish:
+    # a fork PR's GITHUB_TOKEN is read-only, so the release update fails with
+    # "Resource not accessible by integration", and a same-repo PR would
+    # overwrite the public `cli-latest` build with unmerged code.
+    if: github.event_name == 'push'
     needs: [build, package-windows-linux, package-macos]
     runs-on: ubuntu-latest
     permissions:
