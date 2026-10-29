@@ -136,7 +136,7 @@ func main() {
 	}
 	importCmd.Flags().String("project", "", "Target project workspace ID")
 	importCmd.Flags().StringP("file", "f", "", "Specific IaC configuration file to import")
-	importCmd.Flags().StringP("dir", "d", "", "Directory containing IaC files to import")
+	importCmd.Flags().StringP("dir", "d", "", "Directory containing IaC files to import (skips .git, .terraform, node_modules, .github)")
 
 	// deploy
 	var deployCmd = &cobra.Command{
@@ -457,11 +457,13 @@ func runProjectsDelete(cmd *cobra.Command, args []string) {
 	printSuccess("Project deleted successfully.")
 }
 
-// skippedImportDirs are directory names that collectIaCFiles never descends
-// into. Pointing `import --dir` at a repository root otherwise uploads
-// vendored module copies (.terraform/modules), git internals (.git), install
-// trees (node_modules) and CI workflow files (.github), which can be
-// thousands of files and shows up as confusing nodes on the canvas.
+// skippedImportDirs are lower-cased directory names that collectIaCFiles never
+// descends into (matched case-insensitively, since the CLI also runs on
+// case-insensitive Windows and macOS filesystems). Pointing `import --dir` at
+// a repository root otherwise uploads vendored module copies
+// (.terraform/modules), git internals (.git), install trees (node_modules) and
+// CI workflow files (.github), which can be thousands of files and shows up as
+// confusing nodes on the canvas.
 var skippedImportDirs = map[string]bool{
 	".git":         true,
 	".terraform":   true,
@@ -470,23 +472,32 @@ var skippedImportDirs = map[string]bool{
 }
 
 // collectIaCFiles walks dir and returns every .tf/.yml/.yaml file below it,
-// skipping the directories in skippedImportDirs.
+// skipping the directories in skippedImportDirs. The skip list applies to
+// descendants only: a dir that is itself named, say, ".github" is still walked.
+//
+// Only regular files are collected, so a symlink such as `x.tf -> ~/.ssh/id_rsa`
+// can never pull a file from outside the tree into the upload.
 //
 // Each returned FileItem.Name is the file's path relative to dir rather than
 // its bare base name: a plain Base() makes two files with the same name in
 // different folders collide in the upload payload.
-func collectIaCFiles(dir string) ([]FileItem, error) {
-	var files []FileItem
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+//
+// Files that match but cannot be read are not fatal; their paths are returned
+// in unreadable so the caller can warn instead of dropping them silently.
+func collectIaCFiles(dir string) (files []FileItem, unreadable []string, err error) {
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		if info.IsDir() {
-			if skippedImportDirs[info.Name()] {
+			if path != dir && skippedImportDirs[strings.ToLower(info.Name())] {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+
+		if !info.Mode().IsRegular() {
 			return nil
 		}
 
@@ -496,14 +507,15 @@ func collectIaCFiles(dir string) ([]FileItem, error) {
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
-			rel = filepath.Base(path)
+			return err
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			unreadable = append(unreadable, filepath.ToSlash(rel))
+			return nil
 		}
 
 		files = append(files, FileItem{
@@ -514,10 +526,10 @@ func collectIaCFiles(dir string) ([]FileItem, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return files, nil
+	return files, unreadable, nil
 }
 
 func runImport(cmd *cobra.Command, args []string) {
@@ -548,10 +560,13 @@ func runImport(cmd *cobra.Command, args []string) {
 			Content: string(data),
 		})
 	} else {
-		collected, err := collectIaCFiles(dirPath)
+		collected, unreadable, err := collectIaCFiles(dirPath)
 		if err != nil {
 			printError("Failed to walk directory: %v", err)
 			return
+		}
+		for _, name := range unreadable {
+			printWarn("Skipped unreadable file %s", name)
 		}
 		files = collected
 	}
